@@ -1,8 +1,9 @@
 {
+  "version": 2,
   "builds": [
     {
-      "src": "src/pages/EditorEmbed.tsx",
-      "use": "@vercel/next"
+      "src": "src/pages/EditorEmbed.tsx", 
+      "use": "@vercel/vite"  // 使用 Vite 作为构建工具
     }
   ],
   "routes": [
