@@ -1,0 +1,258 @@
+import { useState } from "react";
+import { Link, useLocation } from "react-router-dom";
+import { Menu, X, Search, User, ShoppingCart } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  NavigationMenu,
+  NavigationMenuContent,
+  NavigationMenuItem,
+  NavigationMenuLink,
+  NavigationMenuList,
+  NavigationMenuTrigger,
+} from "@/components/ui/navigation-menu";
+import logoImg from "@/assets/logo.png";
+
+const stickerTypes = [
+  { label: "Die Cut Stickers", href: "/stickers/die-cut" },
+  { label: "Kiss Cut Stickers", href: "/stickers/kiss-cut" },
+  { label: "Sticker Sheets", href: "/stickers/sheets" },
+  { label: "Sticker Packs", href: "/stickers/packs" },
+  { label: "Heavy Duty Stickers", href: "/stickers/heavy-duty" },
+  { label: "Static Clings", href: "/stickers/static-clings" },
+];
+
+const stickerMaterials = [
+  { label: "Vinyl Stickers", href: "/stickers/vinyl" },
+  { label: "Clear Stickers", href: "/stickers/clear" },
+  { label: "Holographic Stickers", href: "/stickers/holographic" },
+  { label: "Glitter Stickers", href: "/stickers/glitter" },
+  { label: "Metallic Stickers", href: "/stickers/metallic" },
+  { label: "Glow-in-the-dark Stickers", href: "/stickers/glow-in-the-dark" },
+];
+
+const labelFormats = [
+  { label: "Roll Labels", href: "/labels/roll" },
+  { label: "Sheet Labels", href: "/labels/sheet" },
+];
+
+const labelMaterials = [
+  { label: "White BOPP Labels", href: "/labels/white-bopp" },
+  { label: "Clear BOPP Labels", href: "/labels/clear-bopp" },
+  { label: "Matte Labels", href: "/labels/matte" },
+  { label: "Gloss Labels", href: "/labels/gloss" },
+];
+
+const browseByUseItems = [
+  { label: "Logo Stickers", href: "/browse-by-use/logo" },
+  { label: "Bottle / Jar Stickers", href: "/browse-by-use/bottle-jar" },
+  { label: "Candle Labels", href: "/browse-by-use/candle" },
+  { label: "Packaging Labels", href: "/browse-by-use/packaging" },
+  { label: "Laptop Stickers", href: "/browse-by-use/laptop" },
+  { label: "Bumper Stickers", href: "/browse-by-use/bumper" },
+  { label: "Window Clings", href: "/browse-by-use/window-clings" },
+];
+
+const navLinks = [
+  { label: "QUOTES", href: "/quotes" },
+  { label: "REORDER", href: "/reorder" },
+  { label: "ABOUT", href: "/about" },
+];
+
+const Navbar = () => {
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const location = useLocation();
+  const isStickersActive = location.pathname.startsWith("/stickers");
+  const isLabelsActive = location.pathname.startsWith("/labels");
+  const isBrowseByUseActive = location.pathname.startsWith("/browse-by-use");
+  
+  
+  return <nav className="sticky top-0 z-50 bg-background/95 backdrop-blur-md border-b border-border">
+      <div className="container mx-auto px-4">
+        <div className="flex items-center justify-between h-20">
+          {/* Logo */}
+          <Link to="/" className="flex items-center gap-2">
+            <img src={logoImg} alt="Sticker Kiko" className="h-12 w-auto" />
+          </Link>
+
+          {/* Desktop Navigation */}
+          <div className="hidden lg:flex items-center gap-2">
+            {/* Stickers Mega Menu */}
+            <NavigationMenu>
+              <NavigationMenuList>
+                <NavigationMenuItem>
+                  <NavigationMenuTrigger className={`px-6 py-3 rounded-2xl font-bold text-base transition-all ${isStickersActive ? "bg-primary text-primary-foreground shadow-lg" : "text-foreground hover:bg-primary/10"}`}>
+                    STICKERS
+                  </NavigationMenuTrigger>
+                  <NavigationMenuContent>
+                    <div className="grid grid-cols-2 gap-6 p-6 w-[500px] bg-background border border-border rounded-xl shadow-xl">
+                      {/* Sticker Type Column */}
+                      <div>
+                        <h3 className="font-bold text-primary mb-3 text-sm uppercase tracking-wide">Sticker Type</h3>
+                        <ul className="space-y-2">
+                          {stickerTypes.map((item) => (
+                            <li key={item.href}>
+                              <NavigationMenuLink asChild>
+                                <Link
+                                  to={item.href}
+                                  className="block py-1.5 text-foreground hover:text-primary transition-colors font-medium"
+                                >
+                                  {item.label}
+                                </Link>
+                              </NavigationMenuLink>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                      {/* Sticker Material Column */}
+                      <div>
+                        <h3 className="font-bold text-primary mb-3 text-sm uppercase tracking-wide">Sticker Material</h3>
+                        <ul className="space-y-2">
+                          {stickerMaterials.map((item) => (
+                            <li key={item.href}>
+                              <NavigationMenuLink asChild>
+                                <Link
+                                  to={item.href}
+                                  className="block py-1.5 text-foreground hover:text-primary transition-colors font-medium"
+                                >
+                                  {item.label}
+                                </Link>
+                              </NavigationMenuLink>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+                  </NavigationMenuContent>
+                </NavigationMenuItem>
+              </NavigationMenuList>
+            </NavigationMenu>
+
+            {/* Labels Mega Menu */}
+            <NavigationMenu>
+              <NavigationMenuList>
+                <NavigationMenuItem>
+                  <NavigationMenuTrigger className={`px-6 py-3 rounded-2xl font-bold text-base transition-all ${isLabelsActive ? "bg-primary text-primary-foreground shadow-lg" : "text-foreground hover:bg-primary/10"}`}>
+                    LABELS
+                  </NavigationMenuTrigger>
+                  <NavigationMenuContent>
+                    <div className="grid grid-cols-2 gap-6 p-6 w-[420px] bg-background border border-border rounded-xl shadow-xl">
+                      {/* Label Formats Column */}
+                      <div>
+                        <h3 className="font-bold text-teal mb-3 text-sm uppercase tracking-wide">Label Formats</h3>
+                        <ul className="space-y-2">
+                          {labelFormats.map((item) => (
+                            <li key={item.href}>
+                              <NavigationMenuLink asChild>
+                                <Link
+                                  to={item.href}
+                                  className="block py-1.5 text-foreground hover:text-teal transition-colors font-medium"
+                                >
+                                  {item.label}
+                                </Link>
+                              </NavigationMenuLink>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                      {/* Label Materials Column */}
+                      <div>
+                        <h3 className="font-bold text-teal mb-3 text-sm uppercase tracking-wide">Label Materials</h3>
+                        <ul className="space-y-2">
+                          {labelMaterials.map((item) => (
+                            <li key={item.href}>
+                              <NavigationMenuLink asChild>
+                                <Link
+                                  to={item.href}
+                                  className="block py-1.5 text-foreground hover:text-teal transition-colors font-medium"
+                                >
+                                  {item.label}
+                                </Link>
+                              </NavigationMenuLink>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+                  </NavigationMenuContent>
+                </NavigationMenuItem>
+              </NavigationMenuList>
+            </NavigationMenu>
+
+            {/* Browse By Use Mega Menu */}
+            <NavigationMenu>
+              <NavigationMenuList>
+                <NavigationMenuItem>
+                  <NavigationMenuTrigger className={`px-6 py-3 rounded-2xl font-bold text-base transition-all ${isBrowseByUseActive ? "bg-primary text-primary-foreground shadow-lg" : "text-foreground hover:bg-primary/10"}`}>
+                    BROWSE BY USE
+                  </NavigationMenuTrigger>
+                  <NavigationMenuContent>
+                    <div className="p-6 w-[280px] bg-background border border-border rounded-xl shadow-xl">
+                      <ul className="space-y-2">
+                        {browseByUseItems.map((item) => (
+                          <li key={item.href}>
+                            <NavigationMenuLink asChild>
+                              <Link
+                                to={item.href}
+                                className="block py-1.5 text-foreground hover:text-teal transition-colors font-medium"
+                              >
+                                {item.label}
+                              </Link>
+                            </NavigationMenuLink>
+                          </li>
+                        ))}
+                        <li className="pt-2 border-t border-border mt-2">
+                          <NavigationMenuLink asChild>
+                            <Link
+                              to="/browse-by-use"
+                              className="block py-1.5 text-teal hover:text-teal/80 transition-colors font-bold"
+                            >
+                              View All →
+                            </Link>
+                          </NavigationMenuLink>
+                        </li>
+                      </ul>
+                    </div>
+                  </NavigationMenuContent>
+                </NavigationMenuItem>
+              </NavigationMenuList>
+            </NavigationMenu>
+
+            {/* Other Nav Links */}
+            {navLinks.map(link => <Link key={link.label} to={link.href} className={`px-6 py-3 rounded-2xl font-bold text-base transition-all ${location.pathname === link.href ? "bg-primary text-primary-foreground shadow-lg" : "text-foreground hover:bg-primary/10 hover:scale-105"}`}>
+                {link.label}
+              </Link>)}
+          </div>
+
+          {/* Actions */}
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="icon" className="rounded-full">
+              <Search className="w-5 h-5" />
+            </Button>
+            <Button variant="ghost" size="icon" className="rounded-full">
+              <User className="w-5 h-5" />
+            </Button>
+            <Button variant="ghost" size="icon" className="rounded-full relative">
+              <ShoppingCart className="w-5 h-5" />
+              <span className="absolute -top-1 -right-1 w-5 h-5 bg-accent text-accent-foreground text-xs rounded-full flex items-center justify-center font-bold">
+                0
+              </span>
+            </Button>
+            <Button variant="ghost" size="icon" className="lg:hidden rounded-full" onClick={() => setMobileMenuOpen(!mobileMenuOpen)}>
+              {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            </Button>
+          </div>
+        </div>
+
+        {/* Mobile Menu */}
+        {mobileMenuOpen && <div className="lg:hidden py-4 border-t border-border animate-fade-in">
+            <div className="flex flex-col gap-4">
+              {navLinks.map(link => <Link key={link.label} to={link.href} onClick={() => setMobileMenuOpen(false)} className={`font-bold py-2 transition-colors ${location.pathname === link.href ? "text-primary" : "text-foreground hover:text-primary"}`}>
+                  {link.label}
+                </Link>)}
+            </div>
+          </div>}
+      </div>
+    </nav>;
+};
+
+export default Navbar;
