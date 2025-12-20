@@ -3,7 +3,7 @@
   "builds": [
     {
       "src": "src/pages/EditorEmbed.tsx", 
-      "use": "@vercel/vite"  // 使用 Vite 作为构建工具
+      "use": "@vercel/vite"
     }
   ],
   "routes": [
