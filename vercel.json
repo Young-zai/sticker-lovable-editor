@@ -3,13 +3,7 @@
   "builds": [
     {
       "src": "src/pages/EditorEmbed.tsx",
-      "use": "@vercel/node"
-    }
-  ],
-  "routes": [
-    {
-      "src": "/editor/embed",
-      "dest": "/src/pages/EditorEmbed.tsx"
+      "use": "@vercel/react"
     }
   ]
 }
