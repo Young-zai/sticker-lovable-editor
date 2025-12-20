@@ -1,5 +1,4 @@
 {
-  "version": 2,
   "builds": [
     {
       "src": "src/pages/EditorEmbed.tsx",
@@ -8,8 +7,8 @@
   ],
   "routes": [
     {
-      "src": "/editor/embed",
-      "dest": "/src/pages/EditorEmbed.tsx"
+      "src": "/editor/.*",
+      "dest": "src/pages/EditorEmbed.tsx"
     }
   ]
 }
