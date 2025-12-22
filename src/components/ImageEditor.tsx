@@ -964,7 +964,26 @@ const ImageEditor = ({
         }),
       });
 
-      const uploadJson = await uploadRes.json();
+      const raw = await uploadRes.text();
+      let uploadJson: any = null;
+      try {
+        uploadJson = raw ? JSON.parse(raw) : null;
+      } catch {
+        // 说明返回不是 JSON（通常是 Vercel 的 HTML 错误页）
+      }
+      
+      if (!uploadRes.ok) {
+        throw new Error(
+          uploadJson?.error ||
+            uploadJson?.message ||
+            `Upload failed (${uploadRes.status}): ${raw?.slice(0, 200) || "empty response"}`
+        );
+      }
+
+if (!uploadJson) {
+  throw new Error(`Upload returned empty/non-JSON response: ${raw?.slice(0, 200) || "empty"}`);
+}
+
       if (!uploadRes.ok) {
         throw new Error(uploadJson?.error || "Upload failed");
       }
