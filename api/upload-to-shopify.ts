@@ -42,7 +42,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(500).json({ error: "Missing Shopify env vars" });
     }
 
-    const API_VERSION = "2024-01";
+    const API_VERSION = "2025-10";
 
     // ===== 拆 base64 =====
     const base64 = imageDataUrl.split(",")[1];
