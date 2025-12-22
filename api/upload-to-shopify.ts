@@ -9,49 +9,34 @@ function safeJsonParse(text: string) {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // ===== 基础响应头（重要，防止 CORS + 空响应）=====
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.setHeader("Access-Control-Allow-Origin", "https://stickerkiko.com");
   res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
-  if (req.method === "OPTIONS") {
-    return res.status(204).end();
-  }
-
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed" });
-  }
+  if (req.method === "OPTIONS") return res.status(204).end();
+  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
   try {
     const body = typeof req.body === "string" ? safeJsonParse(req.body) : req.body;
     const { imageDataUrl, meta } = body || {};
 
-    if (
-      !imageDataUrl ||
-      typeof imageDataUrl !== "string" ||
-      !imageDataUrl.startsWith("data:image")
-    ) {
+    if (!imageDataUrl?.startsWith("data:image")) {
       return res.status(400).json({ error: "Invalid imageDataUrl" });
     }
 
-    const shop = process.env.SHOPIFY_SHOP; // 5rik0n-xh.myshopify.com
+    const shop = process.env.SHOPIFY_SHOP;
     const token = process.env.SHOPIFY_ADMIN_TOKEN;
-
     if (!shop || !token) {
       return res.status(500).json({ error: "Missing Shopify env vars" });
     }
 
-    const API_VERSION = "2025-10";
-
-    // ===== 拆 base64 =====
+    const API_VERSION = "2024-01";
     const base64 = imageDataUrl.split(",")[1];
     const buffer = Buffer.from(base64, "base64");
     const filename = `design-${Date.now()}.png`;
 
-    /* ===============================
-     * 1️⃣ stagedUploadsCreate
-     * =============================== */
+    /* ========= 1️⃣ stagedUploadsCreate ========= */
     const stagedResp = await fetch(
       `https://${shop}/admin/api/${API_VERSION}/graphql.json`,
       {
@@ -65,65 +50,59 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             mutation stagedUploadsCreate($input: [StagedUploadInput!]!) {
               stagedUploadsCreate(input: $input) {
                 stagedTargets {
-                  url
                   resourceUrl
                   parameters {
                     name
                     value
                   }
                 }
-                userErrors {
-                  message
-                }
+                userErrors { message }
               }
             }
           `,
           variables: {
-            input: [
-              {
-                resource: "FILE",
-                filename,
-                mimeType: "image/png",
-                fileSize: buffer.length.toString(),
-                httpMethod: "POST",
-              },
-            ],
+            input: [{
+              resource: "FILE",
+              filename,
+              mimeType: "image/png",
+              fileSize: buffer.length.toString(),
+              httpMethod: "POST",
+            }],
           },
         }),
       }
     );
 
-    const stagedText = await stagedResp.text();
-    const stagedJson = safeJsonParse(stagedText);
+    const stagedJson = safeJsonParse(await stagedResp.text());
+    const target = stagedJson?.data?.stagedUploadsCreate?.stagedTargets?.[0];
 
-    const target =
-      stagedJson?.data?.stagedUploadsCreate?.stagedTargets?.[0];
-
-    if (!target) {
+    if (!target?.resourceUrl || !Array.isArray(target.parameters)) {
       return res.status(500).json({
-        error: "stagedUploadsCreate failed",
-        details: stagedJson ?? stagedText,
+        error: "Invalid staged upload response",
+        details: stagedJson,
       });
     }
 
-    /* ===============================
-     * 2️⃣ 上传文件到 Shopify 存储
-     * =============================== */
+    /* ========= 2️⃣ 真正上传文件（不再用 target.url） ========= */
+    const uploadUrlParam = target.parameters.find((p: any) => p.name === "url");
+    const uploadUrl = uploadUrlParam?.value;
+
+    if (!uploadUrl) {
+      return res.status(500).json({
+        error: "Missing upload URL in staged parameters",
+        details: target.parameters,
+      });
+    }
+
     const form = new FormData();
     target.parameters.forEach((p: any) => {
-      form.append(p.name, p.value);
+      if (p.name !== "url") form.append(p.name, p.value);
     });
-
     form.append("file", new Blob([buffer]), filename);
 
-    await fetch(target.url, {
-      method: "POST",
-      body: form,
-    });
+    await fetch(uploadUrl, { method: "POST", body: form });
 
-    /* ===============================
-     * 3️⃣ fileCreate
-     * =============================== */
+    /* ========= 3️⃣ fileCreate ========= */
     const createResp = await fetch(
       `https://${shop}/admin/api/${API_VERSION}/graphql.json`,
       {
@@ -138,41 +117,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               fileCreate(files: $files) {
                 files {
                   id
-                  alt
                   preview {
-                    image {
-                      url
-                    }
+                    image { url }
                   }
                 }
-                userErrors {
-                  message
-                }
+                userErrors { message }
               }
             }
           `,
           variables: {
-            files: [
-              {
-                originalSource: target.resourceUrl,
-                contentType: "IMAGE",
-                alt: "Sticker design",
-              },
-            ],
+            files: [{
+              originalSource: target.resourceUrl,
+              contentType: "IMAGE",
+            }],
           },
         }),
       }
     );
 
-    const createText = await createResp.text();
-    const createJson = safeJsonParse(createText);
-
+    const createJson = safeJsonParse(await createResp.text());
     const file = createJson?.data?.fileCreate?.files?.[0];
 
-    if (!file) {
+    if (!file?.preview?.image?.url) {
       return res.status(500).json({
         error: "fileCreate failed",
-        details: createJson ?? createText,
+        details: createJson,
       });
     }
 
@@ -182,7 +151,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       meta,
     });
   } catch (err: any) {
-    console.error("Upload error:", err);
+    console.error(err);
     return res.status(500).json({
       error: "Upload error",
       message: err?.message || String(err),
