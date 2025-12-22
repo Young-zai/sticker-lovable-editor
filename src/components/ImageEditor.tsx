@@ -987,7 +987,7 @@ const ImageEditor = ({
     }
   };
 
-  const quantityOptions = [25, 50, 100, 250, 500, 1000];
+  const quantityOptions = [50, 100, 300, 500, 800, 1000,1200,2000,5000];
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
