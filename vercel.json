@@ -1,10 +1,7 @@
 {
   "rewrites": [
-    { "source": "/api/:path*", "destination": "/api/:path*" },
-    { "source": "/assets/:path*", "destination": "/assets/:path*" },
-    { "source": "/favicon.ico", "destination": "/favicon.ico" },
-    { "source": "/robots.txt", "destination": "/robots.txt" },
-    { "source": "/:path*", "destination": "/index.html" }
+    { "source": "/api/(.*)", "destination": "/api/$1" },
+    { "source": "/(.*)", "destination": "/index.html" }
   ],
   "headers": [
     {
@@ -12,7 +9,7 @@
       "headers": [
         {
           "key": "Content-Security-Policy",
-          "value": "frame-ancestors https://*.myshopify.com https://admin.shopify.com https://stickerkiko.com"
+          "value": "frame-ancestors 'self' https://*.myshopify.com https://admin.shopify.com https://stickerkiko.com https://*.stickerkiko.com"
         }
       ]
     }
