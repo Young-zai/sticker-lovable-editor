@@ -2,12 +2,11 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { Canvas as FabricCanvas, FabricImage, Rect, IText, Path } from "fabric";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { 
-  RotateCw, 
-  ZoomIn, 
-  ZoomOut, 
-  Type, 
+import {
+  RotateCw,
+  ZoomIn,
+  ZoomOut,
+  Type,
   Trash2,
   Undo,
   Download,
@@ -23,7 +22,7 @@ import {
   Check
 } from "lucide-react";
 import { toast } from "sonner";
-import { removeBackground, loadImageFromUrl, extractContourPoints } from "@/lib/backgroundRemoval";
+import { removeBackground, extractContourPoints } from "@/lib/backgroundRemoval";
 
 interface ImageEditorProps {
   isOpen: boolean;
@@ -31,7 +30,6 @@ interface ImageEditorProps {
   imageUrl: string | null;
   onSave: (editedImageUrl: string) => void;
   productType?: "die-cut" | "kiss-cut" | "sheet" | "roll";
-  // Pass these from parent for display
   width?: string;
   height?: string;
   quantity?: number;
@@ -46,11 +44,11 @@ type Tool = "select" | "text" | "crop";
 type BorderType = "none" | "small" | "large";
 type LayerType = "image" | "background";
 
-const ImageEditor = ({ 
-  isOpen, 
-  onClose, 
-  imageUrl, 
-  onSave, 
+const ImageEditor = ({
+  isOpen,
+  onClose,
+  imageUrl,
+  onSave,
   productType = "die-cut",
   width = "3",
   height = "3",
@@ -90,6 +88,9 @@ const ImageEditor = ({
   const [copiedObject, setCopiedObject] = useState<string | null>(null);
   const borderRectRef = useRef<Rect | null>(null);
 
+  // ✅ 新增：防止重复提交、并让用户看到“处理中”
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   // Sync with parent props
   useEffect(() => {
     setLocalWidth(width);
@@ -108,7 +109,6 @@ const ImageEditor = ({
     setHistoryIndex(prev => prev + 1);
   }, [historyIndex]);
 
-  // Load image to canvas helper
   const loadImageToCanvas = useCallback((imgSrc: string, canvas: FabricCanvas) => {
     const containerWidth = canvas.width || 500;
     const containerHeight = canvas.height || 400;
@@ -119,24 +119,24 @@ const ImageEditor = ({
       const fabricImg = new FabricImage(imgElement);
       const imgWidth = fabricImg.width || 1;
       const imgHeight = fabricImg.height || 1;
-      
+
       const scale = Math.min(
         (containerWidth - 80) / imgWidth,
         (containerHeight - 80) / imgHeight,
         1
       );
-      
+
       fabricImg.scale(scale);
       fabricImg.set({
         left: (containerWidth - imgWidth * scale) / 2,
         top: (containerHeight - imgHeight * scale) / 2,
         selectable: true,
       });
-      
+
       canvas.add(fabricImg);
       canvas.setActiveObject(fabricImg);
       canvas.renderAll();
-      
+
       const json = JSON.stringify(canvas.toJSON());
       setHistory([json]);
       setHistoryIndex(0);
@@ -147,31 +147,25 @@ const ImageEditor = ({
     imgElement.src = imgSrc;
   }, []);
 
-  // Handle file upload in editor
   const handleEditorFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
       reader.onload = (event) => {
         const imgUrl = event.target?.result as string;
-        // Only update currentImageUrl - the useEffect will handle loading
-        // Reset lastLoadedImageRef to ensure the image gets loaded
         lastLoadedImageRef.current = null;
         setCurrentImageUrl(imgUrl);
       };
       reader.readAsDataURL(file);
     }
-    // Reset input value to allow selecting the same file again
     if (editorFileInputRef.current) {
       editorFileInputRef.current.value = "";
     }
   }, []);
 
-  // Track if canvas is initialized to prevent re-initialization
   const canvasInitializedRef = useRef(false);
   const lastLoadedImageRef = useRef<string | null>(null);
 
-  // Initialize canvas - only once when dialog opens
   useEffect(() => {
     if (!isOpen) {
       setCanvasReady(false);
@@ -179,12 +173,12 @@ const ImageEditor = ({
       setHistoryIndex(-1);
       setRotation(0);
       setZoomLevel(100);
+      setIsSubmitting(false);
       canvasInitializedRef.current = false;
       lastLoadedImageRef.current = null;
       return;
     }
 
-    // Only initialize canvas once per dialog open
     if (canvasInitializedRef.current) return;
 
     const timer = setTimeout(() => {
@@ -208,12 +202,10 @@ const ImageEditor = ({
       canvasInitializedRef.current = true;
       setCanvasReady(true);
 
-      // Only load image if we have one
       if (currentImageUrl) {
         loadImageToCanvas(currentImageUrl, canvas);
         lastLoadedImageRef.current = currentImageUrl;
       } else {
-        // Initialize empty history for empty canvas
         const json = JSON.stringify(canvas.toJSON());
         setHistory([json]);
         setHistoryIndex(0);
@@ -227,31 +219,25 @@ const ImageEditor = ({
         fabricCanvasRef.current = null;
       }
     };
-  }, [isOpen]);
+  }, [isOpen]); // 故意不把 currentImageUrl 放进来，避免重复初始化
 
-  // Load new image when currentImageUrl changes (but not on initial load)
   useEffect(() => {
     const canvas = fabricCanvasRef.current;
     if (!canvas || !canvasReady || !currentImageUrl) return;
-    
-    // Skip if this is the same image we already loaded
     if (lastLoadedImageRef.current === currentImageUrl) return;
-    
-    // Clear and load new image
+
     canvas.clear();
     canvas.backgroundColor = "#f5f5f5";
     loadImageToCanvas(currentImageUrl, canvas);
     lastLoadedImageRef.current = currentImageUrl;
   }, [currentImageUrl, canvasReady, loadImageToCanvas]);
 
-  // Keyboard events - handle shortcuts
   useEffect(() => {
     const canvas = fabricCanvasRef.current;
     if (!canvas || !canvasReady) return;
     canvas.isDrawingMode = false;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Check if the target is an input, textarea, or contenteditable element
       const target = e.target as HTMLElement;
       if (
         target.tagName === "INPUT" ||
@@ -259,18 +245,15 @@ const ImageEditor = ({
         target.tagName === "SELECT" ||
         target.isContentEditable
       ) {
-        // Allow normal keyboard behavior in input fields
         return;
       }
 
-      // Ctrl+Z - Undo
       if ((e.ctrlKey || e.metaKey) && e.key === "z") {
         e.preventDefault();
         handleUndo();
         return;
       }
 
-      // Ctrl+C - Copy
       if ((e.ctrlKey || e.metaKey) && e.key === "c") {
         const activeObject = canvas.getActiveObject();
         if (activeObject && activeObject !== cropRectRef.current && activeObject !== cutLineRef.current && activeObject !== borderRectRef.current) {
@@ -282,12 +265,10 @@ const ImageEditor = ({
         return;
       }
 
-      // Ctrl+V - Paste
       if ((e.ctrlKey || e.metaKey) && e.key === "v") {
         if (copiedObject) {
           e.preventDefault();
           const parsed = JSON.parse(copiedObject);
-          // Use FabricImage or IText based on type
           import("fabric").then(({ util }) => {
             util.enlivenObjects([parsed]).then((objects: any[]) => {
               if (objects[0]) {
@@ -308,10 +289,9 @@ const ImageEditor = ({
         return;
       }
 
-      // Ctrl+S - Save
       if ((e.ctrlKey || e.metaKey) && e.key === "s") {
         e.preventDefault();
-        handleSave();
+        handleSaveAndSignal();
         return;
       }
 
@@ -320,7 +300,7 @@ const ImageEditor = ({
         if (activeObject && activeObject.type === "i-text" && (activeObject as IText).isEditing) {
           return;
         }
-        
+
         e.preventDefault();
         const activeObjects = canvas.getActiveObjects();
         if (activeObjects.length > 0 && !activeObjects.includes(cropRectRef.current as any)) {
@@ -337,15 +317,13 @@ const ImageEditor = ({
     };
 
     document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [activeTool, canvasReady, saveHistory, copiedObject, historyIndex]);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [canvasReady, saveHistory, copiedObject, historyIndex]);
 
   const handleUndo = () => {
     const canvas = fabricCanvasRef.current;
     if (!canvas || historyIndex <= 0) return;
-    
+
     const newIndex = historyIndex - 1;
     canvas.loadFromJSON(JSON.parse(history[newIndex])).then(() => {
       canvas.renderAll();
@@ -356,7 +334,7 @@ const ImageEditor = ({
   const handleToolClick = (tool: Tool) => {
     const canvas = fabricCanvasRef.current;
     if (!canvas) return;
-    
+
     setActiveTool(tool);
 
     if (tool === "text") {
@@ -381,7 +359,6 @@ const ImageEditor = ({
     }
   };
 
-  // Draw cut line - either contour-based or rectangle
   const updateCutLine = useCallback(() => {
     const canvas = fabricCanvasRef.current;
     if (!canvas || !showCutLine || productType !== "die-cut") return;
@@ -393,7 +370,6 @@ const ImageEditor = ({
 
     const objects = canvas.getObjects();
     const imageObj = objects.find(obj => obj.type === "image") as FabricImage | undefined;
-    
     if (!imageObj) return;
 
     const imgLeft = imageObj.left || 0;
@@ -406,11 +382,8 @@ const ImageEditor = ({
 
     const offset = borderType === "none" ? 3 : borderType === "small" ? 8 : 15;
 
-    // If we have contour points (from transparent image), draw contour path
     if (hasTransparency && contourPointsRef.current.length > 10) {
       const points = contourPointsRef.current;
-      
-      // Build SVG path from contour points
       let pathData = `M ${points[0].x * imgScaleX} ${points[0].y * imgScaleY}`;
       for (let i = 1; i < points.length; i++) {
         pathData += ` L ${points[i].x * imgScaleX} ${points[i].y * imgScaleY}`;
@@ -434,7 +407,6 @@ const ImageEditor = ({
       cutLineRef.current = contourPath;
       canvas.add(contourPath);
     } else {
-      // Fallback to rectangle cut line
       const cutLine = new Rect({
         left: imgLeft - offset,
         top: imgTop - offset,
@@ -460,18 +432,15 @@ const ImageEditor = ({
     canvas.renderAll();
   }, [showCutLine, productType, borderType, hasTransparency]);
 
-  // Update border visual on canvas when borderType changes
   const updateBorderVisual = useCallback(() => {
     const canvas = fabricCanvasRef.current;
     if (!canvas || productType !== "die-cut") return;
 
-    // Remove existing border rect
     if (borderRectRef.current) {
       canvas.remove(borderRectRef.current);
       borderRectRef.current = null;
     }
 
-    // Only show border if borderType is not "none"
     if (borderType === "none") {
       canvas.renderAll();
       return;
@@ -479,7 +448,6 @@ const ImageEditor = ({
 
     const objects = canvas.getObjects();
     const imageObj = objects.find(obj => obj.type === "image") as FabricImage | undefined;
-    
     if (!imageObj) return;
 
     const imgLeft = imageObj.left || 0;
@@ -487,8 +455,6 @@ const ImageEditor = ({
     const imgWidth = (imageObj.width || 100) * (imageObj.scaleX || 1);
     const imgHeight = (imageObj.height || 100) * (imageObj.scaleY || 1);
     const imgAngle = imageObj.angle || 0;
-
-    // Border offset based on type
     const borderOffset = borderType === "small" ? 8 : 15;
 
     const borderRect = new Rect({
@@ -511,20 +477,17 @@ const ImageEditor = ({
     borderRectRef.current = borderRect;
     canvas.add(borderRect);
     canvas.sendObjectToBack(borderRect);
-    
-    // Ensure image stays on top of border
+
     canvas.bringObjectToFront(imageObj);
-    
-    // If cut line exists, keep it above border but below image
+
     if (cutLineRef.current) {
       canvas.bringObjectToFront(cutLineRef.current);
       canvas.bringObjectToFront(imageObj);
     }
-    
+
     canvas.renderAll();
   }, [borderType, productType]);
 
-  // Handle layer selection
   const handleLayerClick = useCallback((layer: LayerType) => {
     setActiveLayer(layer);
     const canvas = fabricCanvasRef.current;
@@ -543,11 +506,10 @@ const ImageEditor = ({
     }
   }, []);
 
-  // Toggle background visibility
   const toggleBackground = useCallback(() => {
     const canvas = fabricCanvasRef.current;
     if (!canvas) return;
-    
+
     const newShowBackground = !showBackground;
     setShowBackground(newShowBackground);
     canvas.backgroundColor = newShowBackground ? "#f5f5f5" : "transparent";
@@ -555,25 +517,23 @@ const ImageEditor = ({
     toast.success(newShowBackground ? "Background shown" : "Background hidden");
   }, [showBackground]);
 
-  // Extract contour from image with transparency
   const extractImageContour = useCallback((imageObj: FabricImage) => {
     try {
       const imgElement = (imageObj as any)._element as HTMLImageElement;
       if (!imgElement) return;
 
       const tempCanvas = document.createElement("canvas");
-      const width = imgElement.naturalWidth || imgElement.width;
-      const height = imgElement.naturalHeight || imgElement.height;
-      tempCanvas.width = width;
-      tempCanvas.height = height;
-      
+      const w = imgElement.naturalWidth || imgElement.width;
+      const h = imgElement.naturalHeight || imgElement.height;
+      tempCanvas.width = w;
+      tempCanvas.height = h;
+
       const ctx = tempCanvas.getContext("2d");
       if (!ctx) return;
 
       ctx.drawImage(imgElement, 0, 0);
-      const imageData = ctx.getImageData(0, 0, width, height);
-      
-      // Check if image has transparency
+      const imageData = ctx.getImageData(0, 0, w, h);
+
       let hasAlpha = false;
       for (let i = 3; i < imageData.data.length; i += 4) {
         if (imageData.data[i] < 250) {
@@ -597,14 +557,13 @@ const ImageEditor = ({
     }
   }, []);
 
-  // Handle remove background
   const handleRemoveBackground = async () => {
     const canvas = fabricCanvasRef.current;
     if (!canvas) return;
 
     const objects = canvas.getObjects();
     const imageObj = objects.find(obj => obj.type === "image") as FabricImage | undefined;
-    
+
     if (!imageObj) {
       toast.error("No image found");
       return;
@@ -615,27 +574,23 @@ const ImageEditor = ({
 
     try {
       const imgElement = (imageObj as any)._element as HTMLImageElement;
-      
+
       const resultBlob = await removeBackground(imgElement, (progress) => {
         setBgRemovalProgress(progress);
       });
 
-      // Convert blob to data URL
       const reader = new FileReader();
       reader.onload = () => {
         const dataUrl = reader.result as string;
-        
-        // Get current image properties
+
         const currentLeft = imageObj.left;
         const currentTop = imageObj.top;
         const currentScaleX = imageObj.scaleX;
         const currentScaleY = imageObj.scaleY;
         const currentAngle = imageObj.angle;
 
-        // Remove old image
         canvas.remove(imageObj);
 
-        // Load new image with removed background
         const newImg = new window.Image();
         newImg.crossOrigin = "anonymous";
         newImg.onload = () => {
@@ -652,13 +607,12 @@ const ImageEditor = ({
           canvas.add(fabricImg);
           canvas.setActiveObject(fabricImg);
           canvas.renderAll();
-          
-          // Extract contour for the new transparent image
+
           extractImageContour(fabricImg);
-          
+
           setTimeout(() => updateCutLine(), 100);
           saveHistory(canvas);
-          
+
           toast.success("Background removed!");
           setIsRemovingBg(false);
           setBgRemovalProgress("");
@@ -674,7 +628,6 @@ const ImageEditor = ({
     }
   };
 
-  // Update cut line and border on image changes
   useEffect(() => {
     const canvas = fabricCanvasRef.current;
     if (!canvas || !canvasReady) return;
@@ -700,7 +653,6 @@ const ImageEditor = ({
     };
   }, [canvasReady, updateCutLine, updateBorderVisual]);
 
-  // Update cut line and border when border type changes
   useEffect(() => {
     if (canvasReady) {
       updateCutLine();
@@ -726,7 +678,7 @@ const ImageEditor = ({
   const handleZoom = (direction: "in" | "out") => {
     const newZoom = direction === "in" ? Math.min(zoomLevel + 25, 300) : Math.max(zoomLevel - 25, 25);
     setZoomLevel(newZoom);
-    
+
     const canvas = fabricCanvasRef.current;
     if (!canvas) return;
     const activeObject = canvas.getActiveObject();
@@ -746,7 +698,7 @@ const ImageEditor = ({
 
     const objects = canvas.getObjects();
     const imageObj = objects.find(obj => obj.type === "image") as FabricImage | undefined;
-    
+
     if (!imageObj) {
       toast.error("No image found to crop");
       return;
@@ -780,7 +732,7 @@ const ImageEditor = ({
     canvas.add(cropRect);
     canvas.setActiveObject(cropRect);
     canvas.renderAll();
-    
+
     toast.info("Resize the crop area, then click Apply");
   };
 
@@ -791,7 +743,7 @@ const ImageEditor = ({
 
     const objects = canvas.getObjects();
     const imageObj = objects.find(obj => obj.type === "image") as FabricImage | undefined;
-    
+
     if (!imageObj) {
       toast.error("No image found to crop");
       cancelCrop();
@@ -820,7 +772,7 @@ const ImageEditor = ({
     tempCanvas.width = relativeWidth;
     tempCanvas.height = relativeHeight;
     const ctx = tempCanvas.getContext("2d");
-    
+
     if (!ctx) {
       toast.error("Failed to crop image");
       setIsCropping(false);
@@ -829,7 +781,7 @@ const ImageEditor = ({
     }
 
     const imgElement = (imageObj as any)._element as HTMLImageElement;
-    
+
     ctx.drawImage(
       imgElement,
       relativeLeft, relativeTop, relativeWidth, relativeHeight,
@@ -845,20 +797,20 @@ const ImageEditor = ({
       const fabricImg = new FabricImage(newImgElement);
       const containerWidth = canvas.width || 400;
       const containerHeight = canvas.height || 400;
-      
+
       const scale = Math.min(
         (containerWidth - 80) / (fabricImg.width || 1),
         (containerHeight - 80) / (fabricImg.height || 1),
         1
       );
-      
+
       fabricImg.scale(scale);
       fabricImg.set({
         left: (containerWidth - (fabricImg.width || 1) * scale) / 2,
         top: (containerHeight - (fabricImg.height || 1) * scale) / 2,
         selectable: true,
       });
-      
+
       canvas.add(fabricImg);
       canvas.setActiveObject(fabricImg);
       canvas.renderAll();
@@ -897,78 +849,77 @@ const ImageEditor = ({
       canvas.discardActiveObject();
       canvas.renderAll();
       saveHistory(canvas);
-      // Update border visual after deletion
       updateBorderVisual();
     }
   };
 
-  const handleSave = () => {
+  /**
+   * ✅ 关键改动：点击 “REVIEW & ADD TO CART” 时，不要立刻 onClose()
+   * 因为父页面要靠 postMessage 收到 EDITOR_SAVED 后才能 Ajax /cart/add
+   * 立刻关闭可能会导致 message / network 还没完成就把 iframe 销毁，链路不稳
+   */
+  const handleSaveAndSignal = () => {
     const canvas = fabricCanvasRef.current;
     if (!canvas) return;
-    
+
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+
     // Temporarily hide cut line and border for export
-    if (cutLineRef.current) {
-      canvas.remove(cutLineRef.current);
-    }
-    if (borderRectRef.current) {
-      canvas.remove(borderRectRef.current);
-    }
-    
+    const hadCutLine = !!cutLineRef.current;
+    const hadBorder = !!borderRectRef.current;
+
+    if (cutLineRef.current) canvas.remove(cutLineRef.current);
+    if (borderRectRef.current) canvas.remove(borderRectRef.current);
+
     const dataUrl = canvas.toDataURL({
       format: "png",
       quality: 1,
       multiplier: 2,
     });
-    
-    // Restore cut line and border
-    if (showCutLine) {
-      updateCutLine();
-    }
-    if (borderType !== "none") {
-      updateBorderVisual();
-    }
-    
-    // Update parent with local values
+
+    // Restore visuals
+    if (hadCutLine && showCutLine) updateCutLine();
+    if (hadBorder && borderType !== "none") updateBorderVisual();
+
+    // Sync parent state (optional)
     if (onWidthChange) onWidthChange(localWidth);
     if (onHeightChange) onHeightChange(localHeight);
     if (onQuantityChange) onQuantityChange(localQuantity);
-    
+
+    // ✅ 触发 EditorEmbed.tsx -> postMessage EDITOR_SAVED
     onSave(dataUrl);
-    toast.success("Design saved!");
-    onClose();
+    toast.success("Design saved! Adding to cart...");
+
+    // ✅ 不立刻关闭：让父页面先完成加购
+    // 如果你暂时还没做 ACK，这里给一个兜底：3 秒后自动关闭
+    window.setTimeout(() => {
+      setIsSubmitting(false);
+      onClose();
+    }, 3000);
   };
 
   const handleDownload = () => {
     const canvas = fabricCanvasRef.current;
     if (!canvas) return;
-    
-    // Temporarily hide cut line and border for export
-    if (cutLineRef.current) {
-      canvas.remove(cutLineRef.current);
-    }
-    if (borderRectRef.current) {
-      canvas.remove(borderRectRef.current);
-    }
-    
+
+    if (cutLineRef.current) canvas.remove(cutLineRef.current);
+    if (borderRectRef.current) canvas.remove(borderRectRef.current);
+
     const dataUrl = canvas.toDataURL({
       format: "png",
       quality: 1,
       multiplier: 2,
     });
-    
-    // Restore cut line and border
-    if (showCutLine) {
-      updateCutLine();
-    }
-    if (borderType !== "none") {
-      updateBorderVisual();
-    }
-    
+
+    if (showCutLine) updateCutLine();
+    if (borderType !== "none") updateBorderVisual();
+
     const link = document.createElement("a");
     link.download = "sticker-design.png";
     link.href = dataUrl;
     link.click();
-    
+
     toast.success("Image downloaded!");
   };
 
@@ -987,7 +938,7 @@ const ImageEditor = ({
     }
   };
 
-  const quantityOptions = [50, 100, 300, 500, 800, 1000,1200,2000,5000];
+  const quantityOptions = [50, 100, 300, 500, 800, 1000, 1200, 2000, 5000];
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -1000,22 +951,22 @@ const ImageEditor = ({
             </Button>
           </div>
           <h2 className="font-semibold text-foreground">Sticker Editor</h2>
-          <Button variant="ghost" size="icon" onClick={onClose}>
+          <Button variant="ghost" size="icon" onClick={onClose} disabled={isSubmitting}>
             <X className="w-4 h-4" />
           </Button>
         </div>
 
         {/* Main Content */}
         <div className="flex-1 flex overflow-hidden">
-          {/* Left Sidebar - Tools */}
+          {/* Left Sidebar */}
           <div className="w-12 bg-muted/50 border-r border-border flex flex-col items-center py-4 gap-2">
-            {/* Upload Image Button */}
             <Button
               variant="ghost"
               size="icon"
               onClick={() => editorFileInputRef.current?.click()}
               title="Upload Image"
               className="w-10 h-10"
+              disabled={isSubmitting}
             >
               <Image className="w-5 h-5" />
             </Button>
@@ -1027,53 +978,22 @@ const ImageEditor = ({
               className="hidden"
             />
             <div className="w-8 h-px bg-border my-1" />
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => handleToolClick("text")}
-              title="Add Text"
-              className="w-10 h-10"
-            >
+            <Button variant="ghost" size="icon" onClick={() => handleToolClick("text")} title="Add Text" className="w-10 h-10" disabled={isSubmitting}>
               <Type className="w-5 h-5" />
             </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={startCrop}
-              title="Crop"
-              className="w-10 h-10"
-              disabled={isCropping}
-            >
+            <Button variant="ghost" size="icon" onClick={startCrop} title="Crop" className="w-10 h-10" disabled={isCropping || isSubmitting}>
               <Crop className="w-5 h-5" />
             </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={handleRemoveBackground}
-              title="Remove Background"
-              className="w-10 h-10"
-              disabled={isRemovingBg}
-            >
-              {isRemovingBg ? (
-                <Loader2 className="w-5 h-5 animate-spin" />
-              ) : (
-                <Eraser className="w-5 h-5" />
-              )}
+            <Button variant="ghost" size="icon" onClick={handleRemoveBackground} title="Remove Background" className="w-10 h-10" disabled={isRemovingBg || isSubmitting}>
+              {isRemovingBg ? <Loader2 className="w-5 h-5 animate-spin" /> : <Eraser className="w-5 h-5" />}
             </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={handleDelete}
-              title="Delete"
-              className="w-10 h-10"
-            >
+            <Button variant="ghost" size="icon" onClick={handleDelete} title="Delete" className="w-10 h-10" disabled={isSubmitting}>
               <Trash2 className="w-5 h-5" />
             </Button>
           </div>
 
           {/* Canvas Area */}
           <div className="flex-1 flex flex-col bg-muted/20 relative">
-            {/* Loading Overlay */}
             {isRemovingBg && (
               <div className="absolute inset-0 bg-background/80 z-10 flex flex-col items-center justify-center gap-3">
                 <Loader2 className="w-8 h-8 animate-spin text-teal" />
@@ -1082,58 +1002,45 @@ const ImageEditor = ({
               </div>
             )}
 
-            {/* Canvas */}
-            <div 
-              ref={containerRef} 
-              className="flex-1 flex items-center justify-center p-4 overflow-auto"
-            >
+            <div ref={containerRef} className="flex-1 flex items-center justify-center p-4 overflow-auto">
               <div className="relative bg-white rounded-lg shadow-lg border border-border">
                 <canvas ref={canvasRef} />
               </div>
             </div>
 
-            {/* Bottom Toolbar */}
             <div className="h-14 border-t border-border bg-background flex items-center justify-between px-4">
               <div className="flex items-center gap-4">
                 {isCropping ? (
                   <>
-                    <Button size="sm" onClick={applyCrop} className="bg-teal hover:bg-teal/90 text-white">
+                    <Button size="sm" onClick={applyCrop} className="bg-teal hover:bg-teal/90 text-white" disabled={isSubmitting}>
                       <Scissors className="w-4 h-4 mr-1" />
                       Apply
                     </Button>
-                    <Button variant="outline" size="sm" onClick={cancelCrop}>
-                      Cancel
-                    </Button>
+                    <Button variant="outline" size="sm" onClick={cancelCrop} disabled={isSubmitting}>Cancel</Button>
                   </>
                 ) : (
-                  <>
-                    <Button 
-                      variant="ghost" 
-                      size="sm"
-                      onClick={() => handleRotate("right")}
-                      className="gap-1"
-                    >
-                      <RotateCw className="w-4 h-4" />
-                      ROTATE
-                    </Button>
-                  </>
+                  <Button variant="ghost" size="sm" onClick={() => handleRotate("right")} className="gap-1" disabled={isSubmitting}>
+                    <RotateCw className="w-4 h-4" />
+                    ROTATE
+                  </Button>
                 )}
               </div>
 
               <div className="flex items-center gap-2">
                 <span className="text-sm text-muted-foreground font-medium">{zoomLevel}%</span>
-                <Button variant="ghost" size="icon" onClick={() => handleZoom("out")} className="w-8 h-8">
+                <Button variant="ghost" size="icon" onClick={() => handleZoom("out")} className="w-8 h-8" disabled={isSubmitting}>
                   <ZoomOut className="w-4 h-4" />
                 </Button>
-                <Button variant="ghost" size="icon" onClick={() => handleZoom("in")} className="w-8 h-8">
+                <Button variant="ghost" size="icon" onClick={() => handleZoom("in")} className="w-8 h-8" disabled={isSubmitting}>
                   <ZoomIn className="w-4 h-4" />
                 </Button>
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
+                <Button
+                  variant="ghost"
+                  size="icon"
                   onClick={toggleCutLine}
                   className={`w-8 h-8 ${showCutLine ? "text-red-500" : ""}`}
                   title="Toggle Cut Line Preview"
+                  disabled={isSubmitting}
                 >
                   <Eye className="w-4 h-4" />
                 </Button>
@@ -1141,19 +1048,16 @@ const ImageEditor = ({
             </div>
           </div>
 
-          {/* Right Sidebar - Options Panel */}
+          {/* Right Sidebar */}
           <div className="w-72 bg-background border-l border-border flex flex-col overflow-y-auto">
-            {/* Layers */}
             <div className="p-4 border-b border-border">
               <p className="text-xs text-muted-foreground font-medium mb-2">LAYERS</p>
-              {/* Image Layer */}
               <button
                 onClick={() => handleLayerClick("image")}
                 className={`w-full flex items-center justify-between gap-2 py-2 px-3 rounded-lg mb-2 transition-all ${
-                  activeLayer === "image" 
-                    ? "bg-teal/10 border border-teal" 
-                    : "bg-muted/50 hover:bg-muted border border-transparent"
+                  activeLayer === "image" ? "bg-teal/10 border border-teal" : "bg-muted/50 hover:bg-muted border border-transparent"
                 }`}
+                disabled={isSubmitting}
               >
                 <div className="flex items-center gap-2">
                   <Image className={`w-4 h-4 ${activeLayer === "image" ? "text-teal" : "text-muted-foreground"}`} />
@@ -1161,31 +1065,26 @@ const ImageEditor = ({
                 </div>
                 {activeLayer === "image" && <Check className="w-4 h-4 text-teal" />}
               </button>
-              {/* Background Layer */}
+
               <button
                 onClick={toggleBackground}
                 className={`w-full flex items-center justify-between gap-2 py-2 px-3 rounded-lg transition-all ${
-                  activeLayer === "background" 
-                    ? "bg-teal/10 border border-teal" 
-                    : "bg-muted/30 hover:bg-muted border border-transparent"
+                  activeLayer === "background" ? "bg-teal/10 border border-teal" : "bg-muted/30 hover:bg-muted border border-transparent"
                 }`}
+                disabled={isSubmitting}
               >
                 <div className="flex items-center gap-2">
                   <Layers className={`w-4 h-4 ${showBackground ? "text-muted-foreground" : "text-muted-foreground/50"}`} />
                   <span className={`text-sm ${!showBackground ? "line-through opacity-50" : ""}`}>Background</span>
                 </div>
-                {showBackground ? (
-                  <Eye className="w-4 h-4 text-muted-foreground" />
-                ) : (
-                  <EyeOff className="w-4 h-4 text-muted-foreground/50" />
-                )}
+                {showBackground ? <Eye className="w-4 h-4 text-muted-foreground" /> : <EyeOff className="w-4 h-4 text-muted-foreground/50" />}
               </button>
+
               <p className="text-[10px] text-muted-foreground mt-2 text-center">
                 Click Image to select • Click Background to toggle visibility
               </p>
             </div>
 
-            {/* Need help link */}
             <div className="p-4 border-b border-border">
               <p className="text-sm text-center">
                 Need help creating your design? See our{" "}
@@ -1193,7 +1092,6 @@ const ImageEditor = ({
               </p>
             </div>
 
-            {/* Border Options - Die Cut */}
             {productType === "die-cut" && (
               <div className="p-4 border-b border-border">
                 <label className="text-sm font-semibold text-foreground mb-2 block">BORDER</label>
@@ -1202,65 +1100,42 @@ const ImageEditor = ({
                   {(["none", "small", "large"] as BorderType[]).map((type) => {
                     const isSelected = borderType === type;
                     const borderWidth = type === "none" ? 0 : type === "small" ? 3 : 6;
-                    
+
                     return (
                       <button
                         key={type}
                         onClick={() => setBorderType(type)}
                         className={`flex flex-col items-center gap-2 py-3 px-2 rounded-xl text-xs font-medium transition-all ${
-                          isSelected
-                            ? "bg-teal/10 border-2 border-teal text-teal shadow-sm"
-                            : "bg-muted/50 hover:bg-muted text-foreground border-2 border-transparent"
+                          isSelected ? "bg-teal/10 border-2 border-teal text-teal shadow-sm" : "bg-muted/50 hover:bg-muted text-foreground border-2 border-transparent"
                         }`}
+                        disabled={isSubmitting}
                       >
-                        {/* Visual preview showing sticker with border */}
                         <div className="w-12 h-12 relative flex items-center justify-center">
-                          {/* Outer cut line indicator */}
-                          <div 
-                            className={`absolute rounded-lg transition-all ${
-                              isSelected ? "bg-teal/20" : "bg-muted-foreground/10"
-                            }`}
-                            style={{
-                              width: `${24 + borderWidth * 2}px`,
-                              height: `${24 + borderWidth * 2}px`,
-                            }}
+                          <div
+                            className={`absolute rounded-lg transition-all ${isSelected ? "bg-teal/20" : "bg-muted-foreground/10"}`}
+                            style={{ width: `${24 + borderWidth * 2}px`, height: `${24 + borderWidth * 2}px` }}
                           />
-                          {/* White border area */}
                           {type !== "none" && (
-                            <div 
+                            <div
                               className="absolute bg-white rounded-md shadow-sm"
-                              style={{
-                                width: `${24 + borderWidth * 2}px`,
-                                height: `${24 + borderWidth * 2}px`,
-                              }}
+                              style={{ width: `${24 + borderWidth * 2}px`, height: `${24 + borderWidth * 2}px` }}
                             />
                           )}
-                          {/* Inner design (sticker content) */}
-                          <div 
+                          <div
                             className={`relative rounded-md transition-all ${
-                              isSelected 
-                                ? "bg-gradient-to-br from-teal to-teal/70" 
-                                : "bg-gradient-to-br from-muted-foreground/40 to-muted-foreground/20"
+                              isSelected ? "bg-gradient-to-br from-teal to-teal/70" : "bg-gradient-to-br from-muted-foreground/40 to-muted-foreground/20"
                             }`}
-                            style={{
-                              width: "24px",
-                              height: "24px",
-                            }}
+                            style={{ width: "24px", height: "24px" }}
                           >
-                            {/* Simple icon inside */}
                             <div className="w-full h-full flex items-center justify-center">
                               <div className={`w-3 h-3 rounded-full ${isSelected ? "bg-white/80" : "bg-white/50"}`} />
                             </div>
                           </div>
-                          {/* Dashed cut line */}
-                          <div 
+                          <div
                             className={`absolute rounded-lg border-2 border-dashed pointer-events-none ${
                               isSelected ? "border-teal" : "border-muted-foreground/30"
                             }`}
-                            style={{
-                              width: `${24 + borderWidth * 2 + 4}px`,
-                              height: `${24 + borderWidth * 2 + 4}px`,
-                            }}
+                            style={{ width: `${24 + borderWidth * 2 + 4}px`, height: `${24 + borderWidth * 2 + 4}px` }}
                           />
                         </div>
                         <span className="capitalize">{type}</span>
@@ -1274,10 +1149,9 @@ const ImageEditor = ({
               </div>
             )}
 
-            {/* Size & Quantity */}
             <div className="p-4 border-b border-border">
               <div className="grid grid-cols-5 gap-2 items-end">
-              <div className="col-span-2">
+                <div className="col-span-2">
                   <label className="text-xs text-muted-foreground font-medium mb-1 block">WIDTH</label>
                   <div className="flex items-center">
                     <input
@@ -1286,19 +1160,14 @@ const ImageEditor = ({
                       value={localWidth}
                       onChange={(e) => {
                         const value = e.target.value;
-                        // Allow empty, numbers, and decimal points
-                        if (value === "" || /^\d*\.?\d*$/.test(value)) {
-                          setLocalWidth(value);
-                        }
+                        if (value === "" || /^\d*\.?\d*$/.test(value)) setLocalWidth(value);
                       }}
                       onBlur={() => {
-                        // Ensure minimum value on blur
                         const num = parseFloat(localWidth);
-                        if (isNaN(num) || num < 0.5) {
-                          setLocalWidth("0.5");
-                        }
+                        if (isNaN(num) || num < 0.5) setLocalWidth("0.5");
                       }}
                       className="flex h-10 w-full rounded-l-md border border-r-0 border-border bg-background px-3 py-2 text-sm text-center focus:outline-none focus:ring-2 focus:ring-teal focus:ring-offset-0"
+                      disabled={isSubmitting}
                     />
                     <span className="px-2 py-2 h-10 flex items-center bg-muted border border-l-0 border-border rounded-r-md text-sm text-muted-foreground">in</span>
                   </div>
@@ -1315,31 +1184,27 @@ const ImageEditor = ({
                       value={localHeight}
                       onChange={(e) => {
                         const value = e.target.value;
-                        // Allow empty, numbers, and decimal points
-                        if (value === "" || /^\d*\.?\d*$/.test(value)) {
-                          setLocalHeight(value);
-                        }
+                        if (value === "" || /^\d*\.?\d*$/.test(value)) setLocalHeight(value);
                       }}
                       onBlur={() => {
-                        // Ensure minimum value on blur
                         const num = parseFloat(localHeight);
-                        if (isNaN(num) || num < 0.5) {
-                          setLocalHeight("0.5");
-                        }
+                        if (isNaN(num) || num < 0.5) setLocalHeight("0.5");
                       }}
                       className="flex h-10 w-full rounded-l-md border border-r-0 border-border bg-background px-3 py-2 text-sm text-center focus:outline-none focus:ring-2 focus:ring-teal focus:ring-offset-0"
+                      disabled={isSubmitting}
                     />
                     <span className="px-2 py-2 h-10 flex items-center bg-muted border border-l-0 border-border rounded-r-md text-sm text-muted-foreground">in</span>
                   </div>
                 </div>
               </div>
-              
+
               <div className="mt-4">
                 <label className="text-xs text-muted-foreground font-medium mb-1 block">QUANTITY</label>
-                <select 
+                <select
                   value={localQuantity}
                   onChange={(e) => setLocalQuantity(parseInt(e.target.value))}
                   className="w-full h-10 px-3 rounded-md border border-border bg-background text-foreground text-sm"
+                  disabled={isSubmitting}
                 >
                   {quantityOptions.map((qty) => (
                     <option key={qty} value={qty}>{qty}</option>
@@ -1348,7 +1213,6 @@ const ImageEditor = ({
               </div>
             </div>
 
-            {/* Price */}
             <div className="p-4 border-b border-border">
               <p className="text-sm text-teal font-medium text-center mb-2">Order more, save more!</p>
               <div className="flex items-end justify-between">
@@ -1357,18 +1221,27 @@ const ImageEditor = ({
               </div>
             </div>
 
-            {/* Actions */}
             <div className="p-4 space-y-3 mt-auto">
-              <Button 
-                onClick={handleSave} 
+              <Button
+                onClick={handleSaveAndSignal}
                 className="w-full bg-teal hover:bg-teal/90 text-white py-6 text-base font-semibold rounded-full"
+                disabled={isSubmitting}
               >
-                REVIEW & ADD TO CART
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Adding...
+                  </>
+                ) : (
+                  "REVIEW & ADD TO CART"
+                )}
               </Button>
-              <Button 
-                variant="link" 
+
+              <Button
+                variant="link"
                 onClick={handleDownload}
                 className="w-full text-teal hover:text-teal/80 font-medium"
+                disabled={isSubmitting}
               >
                 <Download className="w-4 h-4 mr-2" />
                 SAVE ARTWORK
