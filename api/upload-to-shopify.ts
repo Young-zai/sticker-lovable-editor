@@ -41,7 +41,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // 2) 调 Shopify Files API
-    const resp = await fetch(`https://${shop}/admin/api/2024-01/files.json`, {
+    const resp = await fetch(`https://${shop}/admin/api/2025-10/files.json`, {
       method: "POST",
       headers: {
         "X-Shopify-Access-Token": token,
