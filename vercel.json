@@ -9,7 +9,7 @@
       "headers": [
         {
           "key": "Content-Security-Policy",
-          "value": "frame-ancestors https://*.myshopify.com https://admin.shopify.com https://stickkiko.com"
+          "value": "frame-ancestors https://*.myshopify.com https://admin.shopify.com https://stickerkiko.com"
         }
       ]
     }
