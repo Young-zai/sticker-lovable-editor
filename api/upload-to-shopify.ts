@@ -1,30 +1,17 @@
-// api/upload-to-shopify.ts
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
-const ALLOWED_ORIGINS = new Set<string>([
-  "https://stickerkiko.com",
-  "https://www.stickerkiko.com",
-  "https://admin.shopify.com",
-  "https://5rik0n-xh.myshopify.com",
-  // 如果你还有 myshopify 域名预览，也可以加：
-  // "https://YOUR-SHOP.myshopify.com",
-]);
-
-function setCors(req: VercelRequest, res: VercelResponse) {
-  const origin = String(req.headers.origin || "");
-  if (ALLOWED_ORIGINS.has(origin)) {
-    res.setHeader("Access-Control-Allow-Origin", origin);
-    res.setHeader("Vary", "Origin");
-  }
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+function safeJsonParse(text: string) {
+  try { return JSON.parse(text); } catch { return null; }
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  setCors(req, res);
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
 
-  // ✅ 关键：预检请求必须直接放行
   if (req.method === "OPTIONS") {
+    // 让浏览器预检直接过（如果你未来需要跨域）
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
     return res.status(204).end();
   }
 
@@ -32,43 +19,58 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const { imageDataUrl, meta } = req.body || {};
-
-  if (!imageDataUrl || typeof imageDataUrl !== "string" || !imageDataUrl.startsWith("data:image")) {
-    return res.status(400).json({ error: "Invalid imageDataUrl" });
-  }
-
-  const shop = process.env.SHOPIFY_SHOP;
-  const token = process.env.SHOPIFY_ADMIN_TOKEN;
-
-  if (!shop || !token) {
-    return res.status(500).json({ error: "Missing Shopify env vars" });
-  }
-
   try {
-    const base64 = imageDataUrl.split(",")[1];
-    if (!base64) return res.status(400).json({ error: "Invalid dataUrl payload" });
+    const body = typeof req.body === "string" ? safeJsonParse(req.body) : req.body;
+    const { imageDataUrl, meta } = body || {};
 
-    const response = await fetch(`https://${shop}/admin/api/2024-01/files.json`, {
+    if (!imageDataUrl || typeof imageDataUrl !== "string" || !imageDataUrl.startsWith("data:image")) {
+      return res.status(400).json({ error: "Invalid imageDataUrl" });
+    }
+
+    const shop = process.env.SHOPIFY_SHOP;
+    const token = process.env.SHOPIFY_ADMIN_TOKEN;
+
+    if (!shop || !token) {
+      return res.status(500).json({ error: "Missing Shopify env vars" });
+    }
+
+    // 1) 拆 base64
+    const base64 = imageDataUrl.split(",")[1];
+    if (!base64) {
+      return res.status(400).json({ error: "Invalid data URL (no base64 payload)" });
+    }
+
+    // 2) 调 Shopify Files API
+    const resp = await fetch(`https://${shop}/admin/api/2024-01/files.json`, {
       method: "POST",
       headers: {
         "X-Shopify-Access-Token": token,
         "Content-Type": "application/json",
+        "Accept": "application/json",
       },
       body: JSON.stringify({
         file: {
           attachment: base64,
-          filename: `design-${Date.now()}.png`,
+          filename: `design-${Date.now()}.jpg`,
         },
       }),
     });
 
-    const json = await response.json();
+    const text = await resp.text();
+    const json = safeJsonParse(text);
 
-    if (!response.ok) {
+    if (!resp.ok) {
       return res.status(500).json({
         error: "Shopify upload failed",
-        details: json,
+        status: resp.status,
+        details: json ?? text?.slice(0, 500),
+      });
+    }
+
+    if (!json?.file) {
+      return res.status(500).json({
+        error: "Shopify upload returned unexpected response",
+        details: json ?? text?.slice(0, 500),
       });
     }
 
@@ -83,6 +85,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({
       error: "Upload error",
       message: err?.message || String(err),
+      // 可选：帮助你定位是 body 过大/平台报错
+      hint: "If response was HTML/empty before, check Vercel Function logs and payload size.",
     });
   }
 }
