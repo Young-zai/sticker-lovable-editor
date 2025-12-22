@@ -865,7 +865,6 @@ const ImageEditor = ({
     if (isSubmitting) return;
     setIsSubmitting(true);
 
-    // Temporarily hide cut line and border for export
     const hadCutLine = !!cutLineRef.current;
     const hadBorder = !!borderRectRef.current;
 
@@ -878,25 +877,19 @@ const ImageEditor = ({
       multiplier: 2,
     });
 
-    // Restore visuals
     if (hadCutLine && showCutLine) updateCutLine();
     if (hadBorder && borderType !== "none") updateBorderVisual();
 
-    // Sync parent state (optional)
     if (onWidthChange) onWidthChange(localWidth);
     if (onHeightChange) onHeightChange(localHeight);
     if (onQuantityChange) onQuantityChange(localQuantity);
 
-    // ✅ 触发 EditorEmbed.tsx -> postMessage EDITOR_SAVED
+    // ✅ 只负责发给父页面，不在这里关闭
     onSave(dataUrl);
     toast.success("Design saved! Adding to cart...");
 
-    // ✅ 不立刻关闭：让父页面先完成加购
-    // 如果你暂时还没做 ACK，这里给一个兜底：3 秒后自动关闭
-    window.setTimeout(() => {
-      setIsSubmitting(false);
-      onClose();
-    }, 3000);
+    // ✅ 这里不关闭，等父页面 CART_ADDED 再关
+    // 提示：如果父页面报错，也可以回传 CART_ADD_FAILED，让这里 setIsSubmitting(false)
   };
 
   const handleDownload = () => {

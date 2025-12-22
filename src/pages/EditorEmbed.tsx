@@ -19,189 +19,135 @@ import ImageEditor from "@/components/ImageEditor";
 
 type ProductType = "die-cut" | "kiss-cut" | "sheet" | "roll";
 
-type OpenPayload = {
+type OpenEditorPayload = {
   type: "OPEN_EDITOR";
-  imageUrl?: string;
+  imageUrl?: string | null;
   width?: number | string;
   height?: number | string;
   quantity?: number;
   productType?: ProductType;
-  price?: string | number;
-  pricePerUnit?: string | number;
+  price?: string;
+  pricePerUnit?: string;
+  // 你也可以加：variantId / productId 等
 };
 
-function toNum(v: any, fallback: number) {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : fallback;
-}
-
-function toStr(v: any, fallback: string) {
-  if (v === undefined || v === null) return fallback;
-  return String(v);
-}
-
 export default function EditorEmbed() {
-  // editor state
-  const [isOpen, setIsOpen] = useState(true);
+  // ✅ 父页面 origin 白名单：如果你知道 shopify 域名就写死更安全
+  // 先用 *兼容* 版：允许任意 origin，但回消息时用 event.origin 精确回发
+  const lastParentOriginRef = useRef<string | null>(null);
 
+  const [isOpen, setIsOpen] = useState(false);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
-  const [width, setWidth] = useState<string>("3");
-  const [height, setHeight] = useState<string>("3");
-  const [quantity, setQuantity] = useState<number>(100);
-
   const [productType, setProductType] = useState<ProductType>("die-cut");
-  const [price, setPrice] = useState<string>("0.00");
-  const [pricePerUnit, setPricePerUnit] = useState<string>("0.00");
 
-  // UI helper when parent didn't send OPEN_EDITOR yet
-  const [waiting, setWaiting] = useState(true);
+  const [width, setWidth] = useState("3");
+  const [height, setHeight] = useState("3");
+  const [quantity, setQuantity] = useState(100);
+  const [price, setPrice] = useState("0.00");
+  const [pricePerUnit, setPricePerUnit] = useState("0.00");
 
-  // parent window + origin
-  const parentWinRef = useRef<Window | null>(null);
-  const parentOriginRef = useRef<string>("*");
+  // ✅ 保存后的设计图（dataURL）
+  const lastSavedImageRef = useRef<string | null>(null);
 
-  /**
-   * ✅ 允许的父页面 origin 白名单
-   * - 开发期：localhost + 你的 Shopify 域名
-   * - 上线：填你的正式 Shopify 域名（以及预览域名）
-   *
-   * 先给你一个“可用默认值”：不写死，先用 "*" 接收，但回传用收到的 e.origin
-   * （这样线上更安全）
-   */
-  const allowedOrigins = useMemo(() => {
-    // 你可以按需加： "https://your-store.myshopify.com", "https://www.yourstore.com"
-    return new Set<string>([
-      "http://localhost:8080",
-      "http://localhost:3000",
-      "http://localhost:5173",
-      // Shopify 预览有时是 https://xxxx.myshopify.com
-      // 这里先不强校验域名模式，等你上线再收紧
-    ]);
+  const postToParent = useCallback((msg: any) => {
+    const origin = lastParentOriginRef.current;
+    // 如果不知道 origin，退化成 '*'（不推荐，但能先跑通）
+    window.parent?.postMessage(msg, origin ?? "*");
+  }, []);
+
+  // 告诉父页面：iframe ready
+  useEffect(() => {
+    // embed 页面加载后尽快告诉父页面
+    window.parent?.postMessage({ type: "EDITOR_READY" }, "*");
   }, []);
 
   useEffect(() => {
-    // 1) 告诉父页面：iframe 已就绪
-    window.parent?.postMessage({ type: "EDITOR_READY" }, "*");
+    const onMessage = (event: MessageEvent) => {
+      const data = event.data || {};
+      if (!data?.type) return;
 
-    // 2) 等待父页面发 OPEN_EDITOR
-    const onMessage = (e: MessageEvent) => {
-      const d = e.data as OpenPayload;
-      if (!d || d.type !== "OPEN_EDITOR") return;
+      // ✅ 记录父页面 origin，后续回发用它（避免回给错误来源）
+      lastParentOriginRef.current = event.origin;
 
-      /**
-       * ✅ 接收端安全策略：
-       * - 开发阶段：允许 localhost / 任意（避免你卡在域名校验）
-       * - 上线后：你可以把下面逻辑改成“只允许白名单”
-       */
-      const isLocal =
-        e.origin.startsWith("http://localhost") ||
-        e.origin.startsWith("http://127.0.0.1");
-      const isAllowed = isLocal || allowedOrigins.has(e.origin) || allowedOrigins.size === 0;
+      // 1) 打开编辑器
+      if (data.type === "OPEN_EDITOR") {
+        const payload = data as OpenEditorPayload;
 
-      // 你现在要顺滑开发：先不 hard block，但会记录 origin
-      // 如果你要强校验：把下面 if 打开即可
-      // if (!isAllowed) return;
+        setImageUrl(payload.imageUrl ?? null);
+        setProductType(payload.productType ?? "die-cut");
+        setWidth(String(payload.width ?? "3"));
+        setHeight(String(payload.height ?? "3"));
+        setQuantity(Number(payload.quantity ?? 100));
+        setPrice(String(payload.price ?? "0.00"));
+        setPricePerUnit(String(payload.pricePerUnit ?? "0.00"));
 
-      parentWinRef.current = e.source as Window;
-      parentOriginRef.current = e.origin || "*";
+        lastSavedImageRef.current = null;
+        setIsOpen(true);
 
-      setImageUrl(d.imageUrl ? String(d.imageUrl) : null);
-      setWidth(toStr(d.width, "3"));
-      setHeight(toStr(d.height, "3"));
-      setQuantity(toNum(d.quantity, 100));
+        postToParent({ type: "EDITOR_OPENED" });
+        return;
+      }
 
-      setProductType((d.productType as ProductType) || "die-cut");
-      setPrice(toStr(d.price, "0.00"));
-      setPricePerUnit(toStr(d.pricePerUnit, "0.00"));
+      // 2) 父页面加购成功的 ACK：此时再关闭
+      if (data.type === "CART_ADDED") {
+        // 你也可以让父页面带上 cart item key 做校验
+        setIsOpen(false);
+        postToParent({ type: "EDITOR_CLOSED" });
+        return;
+      }
 
-      setWaiting(false);
-      setIsOpen(true);
+      // 3) 父页面要求关闭（可选）
+      if (data.type === "CLOSE_EDITOR") {
+        setIsOpen(false);
+        postToParent({ type: "EDITOR_CLOSED" });
+        return;
+      }
     };
 
     window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [postToParent]);
 
-    // 3) 10 秒还没收到 OPEN_EDITOR，就给个提示（不影响功能）
-    const t = window.setTimeout(() => {
-      setWaiting((w) => w); // 保持现状，只是为了不“白屏无反馈”
-    }, 10000);
-
-    return () => {
-      window.removeEventListener("message", onMessage);
-      window.clearTimeout(t);
-    };
-  }, [allowedOrigins]);
-
-  const postToParent = (payload: any) => {
-    const win = parentWinRef.current ?? window.parent;
-    const origin = parentOriginRef.current || "*";
-    try {
-      win?.postMessage(payload, origin === "null" ? "*" : origin);
-    } catch {
-      // 某些环境下 origin 可能异常，兜底用 *
-      win?.postMessage(payload, "*");
-    }
-  };
-
-  const handleSave = (editedImageUrl: string) => {
-    postToParent({
-      type: "EDITOR_SAVED",
-      editedImageUrl,
-      width,
-      height,
-      quantity,
-      productType,
-      price,
-      pricePerUnit,
-    });
-
+  // 点击右上角 X / 背景关闭：通知父页面
+  const handleClose = useCallback(() => {
     setIsOpen(false);
-  };
+    postToParent({ type: "EDITOR_CLOSED" });
+  }, [postToParent]);
+
+  // ✅ ImageEditor 点“REVIEW & ADD TO CART”会调用这里
+  // 这里不要关闭！只发 EDITOR_SAVED，让父页面去加购；等父页面回 CART_ADDED 再关
+  const handleSave = useCallback(
+    (editedImageUrl: string) => {
+      lastSavedImageRef.current = editedImageUrl;
+
+      postToParent({
+        type: "EDITOR_SAVED",
+        editedImageUrl,
+        width,
+        height,
+        quantity,
+        productType,
+        price,
+        pricePerUnit,
+      });
+    },
+    [postToParent, width, height, quantity, productType, price, pricePerUnit]
+  );
 
   return (
-    <div style={{ width: "100vw", height: "100vh", background: "#fff" }}>
-      {/* 没收到 OPEN_EDITOR 时给提示（不会影响 iframe 正常工作） */}
-      {waiting && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontFamily:
-              'ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial',
-            color: "#111827",
-            background: "#ffffff",
-            zIndex: 1,
-          }}
-        >
-          <div style={{ textAlign: "center", maxWidth: 520, padding: 24 }}>
-            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>
-              Waiting for Shopify…
-            </div>
-            <div style={{ fontSize: 13, color: "#6B7280", lineHeight: 1.6 }}>
-              This page is an embed-only editor. It will open after the parent page
-              sends <code>OPEN_EDITOR</code> via <code>postMessage</code>.
-            </div>
-          </div>
-        </div>
-      )}
-
+    <div style={{ width: "100vw", height: "100vh" }}>
       <ImageEditor
         isOpen={isOpen}
-        onClose={() => {
-          setIsOpen(false);
-          postToParent({ type: "EDITOR_CLOSED" });
-        }}
+        onClose={handleClose}
         imageUrl={imageUrl}
         onSave={handleSave}
         productType={productType}
         width={width}
         height={height}
         quantity={quantity}
-        onWidthChange={setWidth}
-        onHeightChange={setHeight}
-        onQuantityChange={setQuantity}
+        onWidthChange={(w) => setWidth(w)}
+        onHeightChange={(h) => setHeight(h)}
+        onQuantityChange={(q) => setQuantity(q)}
         price={price}
         pricePerUnit={pricePerUnit}
       />
