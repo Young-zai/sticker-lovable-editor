@@ -8,24 +8,23 @@ function safeJsonParse(text: string) {
   }
 }
 
-function getOriginAllowlist(origin?: string) {
-  // ✅ 改成你的正式域名（不要用 *，否则你未来要带 cookie 会出问题）
-  const allow = new Set([
-    "https://stickerkiko.com",
-    "https://www.stickerkiko.com",
-  ]);
-  if (!origin) return "https://stickerkiko.com";
-  return allow.has(origin) ? origin : "https://stickerkiko.com";
+function setCors(req: VercelRequest, res: VercelResponse) {
+  // 你也可以改成只允许 https://stickerkiko.com
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 }
 
-function parseDataUrl(dataUrl: string): { mime: string; base64: string } | null {
-  // data:image/png;base64,xxxx
+function dataUrlToBuffer(dataUrl: string) {
   const m = dataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
   if (!m) return null;
-  return { mime: m[1], base64: m[2] };
+  const mime = m[1];
+  const base64 = m[2];
+  const buf = Buffer.from(base64, "base64");
+  return { mime, buf };
 }
 
-async function shopifyGraphQL(shop: string, token: string, query: string, variables?: any) {
+async function shopifyGraphQL(shop: string, token: string, query: string, variables: any) {
   const resp = await fetch(`https://${shop}/admin/api/2025-10/graphql.json`, {
     method: "POST",
     headers: {
@@ -40,22 +39,20 @@ async function shopifyGraphQL(shop: string, token: string, query: string, variab
   const json = safeJsonParse(text);
 
   if (!resp.ok) {
-    throw new Error(
-      `Shopify GraphQL HTTP ${resp.status}: ${JSON.stringify(json ?? text?.slice(0, 500))}`
-    );
+    throw new Error(`Shopify GraphQL HTTP ${resp.status}: ${text?.slice(0, 500)}`);
+  }
+  if (!json) {
+    throw new Error(`Shopify GraphQL invalid JSON: ${text?.slice(0, 500)}`);
+  }
+  if (json.errors?.length) {
+    throw new Error(`Shopify GraphQL errors: ${JSON.stringify(json.errors).slice(0, 800)}`);
   }
   return json;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const origin = req.headers.origin as string | undefined;
-  const allowOrigin = getOriginAllowlist(origin);
-
+  setCors(req, res);
   res.setHeader("Content-Type", "application/json; charset=utf-8");
-  res.setHeader("Access-Control-Allow-Origin", allowOrigin);
-  res.setHeader("Vary", "Origin");
-  res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
   if (req.method === "OPTIONS") return res.status(204).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
@@ -68,213 +65,183 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: "Invalid imageDataUrl" });
     }
 
-    // ✅ 如果前端传来的已经是 https 文件 URL（比如你以后直接用 CDN）
+    // 如果你以后某些场景传进来的是已存在的 https url，这里直接透传（不再上传）
     if (/^https?:\/\//i.test(imageDataUrl)) {
       return res.status(200).json({
         designId: "",
         designUrl: imageDataUrl,
         meta,
-        note: "imageDataUrl already a URL, skipped upload",
+        passthrough: true,
       });
     }
 
-    // ❌ blob: 不可能在 server 端拿到内容（blob 只存在于浏览器内存）
-    if (imageDataUrl.startsWith("blob:")) {
-      return res.status(400).json({
-        error: "Invalid imageDataUrl",
-        hint: "You passed a blob: URL. Convert it to data:image/...;base64,... before sending.",
-      });
-    }
-
-    const parsed = parseDataUrl(imageDataUrl);
-    if (!parsed) {
-      return res.status(400).json({
-        error: "Invalid imageDataUrl",
-        hint: "Expected data:image/<type>;base64,<payload>",
-      });
-    }
+    const parsed = dataUrlToBuffer(imageDataUrl);
+    if (!parsed) return res.status(400).json({ error: "Invalid imageDataUrl" });
 
     const shop = process.env.SHOPIFY_SHOP;
     const token = process.env.SHOPIFY_ADMIN_TOKEN;
-    if (!shop || !token) {
-      return res.status(500).json({ error: "Missing Shopify env vars" });
-    }
+    if (!shop || !token) return res.status(500).json({ error: "Missing Shopify env vars" });
 
-    const filename = `design-${Date.now()}.${parsed.mime.includes("png") ? "png" : "jpg"}`;
-    const byteSize = Math.floor((parsed.base64.length * 3) / 4); // 近似即可
+    const filename = `design-${Date.now()}.png`;
+    const fileSize = parsed.buf.length;
+    const mimeType = parsed.mime;
 
-    // 1) stagedUploadsCreate：拿 GCS 上传地址 + fields
-    const stagedResp = await shopifyGraphQL(
-      shop,
-      token,
-      `
-        mutation stagedUploadsCreate($input: [StagedUploadInput!]!) {
-          stagedUploadsCreate(input: $input) {
-            stagedTargets {
-              url
-              resourceUrl
-              parameters { name value }
+    // 1) stagedUploadsCreate
+    const STAGED_UPLOADS_CREATE = /* GraphQL */ `
+      mutation stagedUploadsCreate($input: [StagedUploadInput!]!) {
+        stagedUploadsCreate(input: $input) {
+          stagedTargets {
+            url
+            resourceUrl
+            parameters {
+              name
+              value
             }
-            userErrors { field message }
+          }
+          userErrors {
+            field
+            message
           }
         }
-      `,
-      {
-        input: [
-          {
-            resource: "FILE",
-            filename,
-            mimeType: parsed.mime,
-            httpMethod: "POST",
-            fileSize: String(byteSize),
-          },
-        ],
       }
-    );
+    `;
 
-    const stagedErrors = stagedResp?.data?.stagedUploadsCreate?.userErrors;
-    if (stagedErrors?.length) {
-      return res.status(500).json({ error: "stagedUploadsCreate userErrors", details: stagedErrors });
+    const stagedJson = await shopifyGraphQL(shop, token, STAGED_UPLOADS_CREATE, {
+      input: [
+        {
+          resource: "FILE",
+          filename,
+          mimeType,
+          httpMethod: "POST",
+          fileSize: String(fileSize),
+        },
+      ],
+    });
+
+    const staged = stagedJson?.data?.stagedUploadsCreate;
+    const userErrors1 = staged?.userErrors || [];
+    if (userErrors1.length) {
+      return res.status(500).json({ error: "stagedUploadsCreate userErrors", details: userErrors1 });
     }
 
-    const target = stagedResp?.data?.stagedUploadsCreate?.stagedTargets?.[0];
-    const uploadUrl: string | null = target?.url || null;
-    const resourceUrl: string | null = target?.resourceUrl || null;
-    const parameters: Array<{ name: string; value: string }> = target?.parameters || [];
+    const target = staged?.stagedTargets?.[0];
+    const uploadUrl: string | undefined = target?.url;
+    const resourceUrl: string | undefined = target?.resourceUrl;
+    const params: { name: string; value: string }[] = target?.parameters || [];
 
-    if (!uploadUrl) {
+    if (!uploadUrl || !resourceUrl) {
       return res.status(500).json({
-        error: "Missing upload URL in staged parameters",
-        details: parameters,
-        raw: stagedResp,
+        error: "Missing uploadUrl/resourceUrl from stagedUploadsCreate",
+        details: target || stagedJson,
       });
     }
-    if (!resourceUrl) {
-      return res.status(500).json({
-        error: "Missing resourceUrl in staged parameters",
-        details: parameters,
-        raw: stagedResp,
-      });
-    }
 
-    // 2) 上传到 GCS（multipart/form-data）
+    // 2) POST multipart to staged upload URL
     const form = new FormData();
-    for (const p of parameters) form.append(p.name, p.value);
+    for (const p of params) form.append(p.name, p.value);
+    form.append("file", new Blob([parsed.buf], { type: mimeType }), filename);
 
-    // base64 -> Blob
-    const bin = Buffer.from(parsed.base64, "base64");
-    const blob = new Blob([bin], { type: parsed.mime });
-    form.append("file", blob, filename);
-
-    const uploadResp = await fetch(uploadUrl, { method: "POST", body: form });
-    if (!uploadResp.ok) {
-      const t = await uploadResp.text();
+    const upResp = await fetch(uploadUrl, { method: "POST", body: form as any });
+    if (!upResp.ok) {
+      const t = await upResp.text();
       return res.status(500).json({
         error: "Staged upload failed",
-        status: uploadResp.status,
-        details: t?.slice(0, 500),
+        status: upResp.status,
+        details: t?.slice(0, 800),
       });
     }
 
-    // 3) fileCreate：把 staged resourceUrl 注册成 Shopify File
-    const createResp = await shopifyGraphQL(
-      shop,
-      token,
-      `
-        mutation fileCreate($files: [FileCreateInput!]!) {
-          fileCreate(files: $files) {
-            files {
+    // 3) fileCreate
+    const FILE_CREATE = /* GraphQL */ `
+      mutation fileCreate($files: [FileCreateInput!]!) {
+        fileCreate(files: $files) {
+          files {
+            __typename
+            ... on MediaImage {
               id
-              ... on MediaImage {
-                image { url }
-                preview { image { url } }
-              }
-              ... on GenericFile {
+              image {
                 url
               }
+              preview {
+                image {
+                  url
+                }
+              }
             }
-            userErrors { field message }
+            ... on GenericFile {
+              id
+              url
+            }
+          }
+          userErrors {
+            field
+            message
           }
         }
-      `,
-      {
-        files: [
-          {
-            originalSource: resourceUrl,
-            alt: "Sticker design",
-            contentType: parsed.mime.includes("png") ? "IMAGE" : "IMAGE",
-          },
-        ],
       }
-    );
+    `;
 
-    const createErrors = createResp?.data?.fileCreate?.userErrors;
-    if (createErrors?.length) {
-      return res.status(500).json({ error: "fileCreate userErrors", details: createErrors, raw: createResp });
-    }
-
-    const created = createResp?.data?.fileCreate?.files?.[0];
-    const fileId: string | undefined = created?.id;
-    if (!fileId) {
-      return res.status(500).json({
-        error: "fileCreate returned unexpected response",
-        details: createResp,
-      });
-    }
-
-    // 4) 轮询拿最终 URL（Shopify 可能异步生成 preview）
-    const queryFile = async () => {
-      const q = await shopifyGraphQL(
-        shop,
-        token,
-        `
-          query node($id: ID!) {
-            node(id: $id) {
-              id
-              ... on MediaImage {
-                image { url }
-                preview { image { url } }
-              }
-              ... on GenericFile {
-                url
-              }
-            }
-          }
-        `,
-        { id: fileId }
-      );
-
-      const node = q?.data?.node;
-      const url =
-        node?.url ||
-        node?.image?.url ||
-        node?.preview?.image?.url ||
-        null;
-
-      return { node, url };
-    };
-
-    let finalUrl: string | null = null;
-    let lastNode: any = null;
-
-    for (let i = 0; i < 8; i++) {
-      const { node, url } = await queryFile();
-      lastNode = node;
-      if (url) {
-        finalUrl = url;
-        break;
-      }
-      // 等 500ms 再查
-      await new Promise((r) => setTimeout(r, 500));
-    }
-
-    // ✅ 就算还没拿到 url，也把 id 返回（至少不再报 null 读属性）
-    return res.status(200).json({
-      designId: fileId,
-      designUrl: finalUrl, // 可能为 null（极少数店铺很慢）
-      meta,
-      debug: finalUrl ? undefined : { note: "URL not ready yet, try again later", lastNode },
+    const createJson = await shopifyGraphQL(shop, token, FILE_CREATE, {
+      files: [
+        {
+          originalSource: resourceUrl,
+          contentType: "IMAGE",
+          alt: "Sticker design",
+        },
+      ],
     });
+
+    const fc = createJson?.data?.fileCreate;
+    const userErrors2 = fc?.userErrors || [];
+    if (userErrors2.length) {
+      return res.status(500).json({ error: "fileCreate userErrors", details: userErrors2 });
+    }
+
+    const created = fc?.files?.[0];
+    const designId: string | undefined = created?.id;
+
+    // 4) image.url 可能一开始是 null，poll 一下
+    let designUrl: string | null =
+      created?.image?.url ||
+      created?.preview?.image?.url ||
+      created?.url ||
+      null;
+
+    const NODE_QUERY = /* GraphQL */ `
+      query node($id: ID!) {
+        node(id: $id) {
+          __typename
+          ... on MediaImage {
+            id
+            image { url }
+            preview { image { url } }
+          }
+          ... on GenericFile {
+            id
+            url
+          }
+        }
+      }
+    `;
+
+    if (designId && !designUrl) {
+      for (let i = 0; i < 6; i++) {
+        await new Promise((r) => setTimeout(r, 600));
+        const nodeJson = await shopifyGraphQL(shop, token, NODE_QUERY, { id: designId });
+        const node = nodeJson?.data?.node;
+        designUrl =
+          node?.image?.url ||
+          node?.preview?.image?.url ||
+          node?.url ||
+          null;
+        if (designUrl) break;
+      }
+    }
+
+    // 最后兜底：至少返回 resourceUrl（虽然它不是 CDN，但能定位）
+    if (!designUrl) designUrl = resourceUrl;
+
+    return res.status(200).json({ designId: designId || "", designUrl, meta });
   } catch (err: any) {
     return res.status(500).json({
       error: "Upload error",
