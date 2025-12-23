@@ -44,6 +44,12 @@ interface ImageEditorProps {
   onQuantityChange?: (q: number) => void;
   price?: string;
   pricePerUnit?: string;
+
+  /**
+   * ✅ 关键：嵌入模式（Shopify iframe embed）
+   * embedded=true 时不使用 Radix Dialog（避免 iframe 内再生成一层 overlay 黑框）
+   */
+  embedded?: boolean;
 }
 
 type Tool = "select" | "text" | "crop";
@@ -64,6 +70,7 @@ const ImageEditor = ({
   onQuantityChange,
   price = "0.00",
   pricePerUnit = "0.00",
+  embedded = false,
 }: ImageEditorProps) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -968,10 +975,8 @@ const ImageEditor = ({
       let uploadJson: any = null;
       try {
         uploadJson = raw ? JSON.parse(raw) : null;
-      } catch {
-        // 说明返回不是 JSON（通常是 Vercel 的 HTML 错误页）
-      }
-      
+      } catch {}
+
       if (!uploadRes.ok) {
         throw new Error(
           uploadJson?.error ||
@@ -980,12 +985,8 @@ const ImageEditor = ({
         );
       }
 
-if (!uploadJson) {
-  throw new Error(`Upload returned empty/non-JSON response: ${raw?.slice(0, 200) || "empty"}`);
-}
-
-      if (!uploadRes.ok) {
-        throw new Error(uploadJson?.error || "Upload failed");
+      if (!uploadJson) {
+        throw new Error(`Upload returned empty/non-JSON response: ${raw?.slice(0, 200) || "empty"}`);
       }
 
       const { designUrl, designId } = uploadJson;
@@ -1057,375 +1058,396 @@ if (!uploadJson) {
 
   const quantityOptions = [50, 100, 300, 500, 800, 1000, 2000];
 
-  return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && !isSavingToCart && onClose()}>
-      <DialogContent className="max-w-6xl w-[95vw] h-[90vh] p-0 overflow-hidden flex flex-col bg-background [&>button]:hidden">
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/30">
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="icon" onClick={handleUndo} disabled={historyIndex <= 0 || isSavingToCart}>
-              <Undo className="w-4 h-4" />
-            </Button>
-          </div>
-          <h2 className="font-semibold text-foreground">Sticker Editor</h2>
-          <Button variant="ghost" size="icon" onClick={() => !isSavingToCart && onClose()} disabled={isSavingToCart}>
-            <X className="w-4 h-4" />
+  // ✅ 把原来 DialogContent 里的主体提出来，embed/非embed 复用
+  const editorBody = (
+    <div className="max-w-6xl w-[95vw] h-[90vh] p-0 overflow-hidden flex flex-col bg-background">
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/30">
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="icon" onClick={handleUndo} disabled={historyIndex <= 0 || isSavingToCart}>
+            <Undo className="w-4 h-4" />
+          </Button>
+        </div>
+        <h2 className="font-semibold text-foreground">Sticker Editor</h2>
+        <Button variant="ghost" size="icon" onClick={() => !isSavingToCart && onClose()} disabled={isSavingToCart}>
+          <X className="w-4 h-4" />
+        </Button>
+      </div>
+
+      {/* Main Content */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Left Sidebar - Tools */}
+        <div className="w-12 bg-muted/50 border-r border-border flex flex-col items-center py-4 gap-2">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => editorFileInputRef.current?.click()}
+            title="Upload Image"
+            className="w-10 h-10"
+            disabled={isSavingToCart}
+          >
+            <Image className="w-5 h-5" />
+          </Button>
+          <input
+            ref={editorFileInputRef}
+            type="file"
+            accept="image/*,.pdf,.ai,.svg"
+            onChange={handleEditorFileUpload}
+            className="hidden"
+          />
+          <div className="w-8 h-px bg-border my-1" />
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => handleToolClick("text")}
+            title="Add Text"
+            className="w-10 h-10"
+            disabled={isSavingToCart}
+          >
+            <Type className="w-5 h-5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={startCrop}
+            title="Crop"
+            className="w-10 h-10"
+            disabled={isCropping || isSavingToCart}
+          >
+            <Crop className="w-5 h-5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={handleRemoveBackground}
+            title="Remove Background"
+            className="w-10 h-10"
+            disabled={isRemovingBg || isSavingToCart}
+          >
+            {isRemovingBg ? <Loader2 className="w-5 h-5 animate-spin" /> : <Eraser className="w-5 h-5" />}
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={handleDelete}
+            title="Delete"
+            className="w-10 h-10"
+            disabled={isSavingToCart}
+          >
+            <Trash2 className="w-5 h-5" />
           </Button>
         </div>
 
-        {/* Main Content */}
-        <div className="flex-1 flex overflow-hidden">
-          {/* Left Sidebar - Tools */}
-          <div className="w-12 bg-muted/50 border-r border-border flex flex-col items-center py-4 gap-2">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => editorFileInputRef.current?.click()}
-              title="Upload Image"
-              className="w-10 h-10"
-              disabled={isSavingToCart}
-            >
-              <Image className="w-5 h-5" />
-            </Button>
-            <input
-              ref={editorFileInputRef}
-              type="file"
-              accept="image/*,.pdf,.ai,.svg"
-              onChange={handleEditorFileUpload}
-              className="hidden"
-            />
-            <div className="w-8 h-px bg-border my-1" />
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => handleToolClick("text")}
-              title="Add Text"
-              className="w-10 h-10"
-              disabled={isSavingToCart}
-            >
-              <Type className="w-5 h-5" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={startCrop}
-              title="Crop"
-              className="w-10 h-10"
-              disabled={isCropping || isSavingToCart}
-            >
-              <Crop className="w-5 h-5" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={handleRemoveBackground}
-              title="Remove Background"
-              className="w-10 h-10"
-              disabled={isRemovingBg || isSavingToCart}
-            >
-              {isRemovingBg ? <Loader2 className="w-5 h-5 animate-spin" /> : <Eraser className="w-5 h-5" />}
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={handleDelete}
-              title="Delete"
-              className="w-10 h-10"
-              disabled={isSavingToCart}
-            >
-              <Trash2 className="w-5 h-5" />
-            </Button>
+        {/* Canvas Area */}
+        <div className="flex-1 flex flex-col bg-muted/20 relative">
+          {/* Loading Overlay */}
+          {(isRemovingBg || isSavingToCart) && (
+            <div className="absolute inset-0 bg-background/80 z-10 flex flex-col items-center justify-center gap-3">
+              <Loader2 className="w-8 h-8 animate-spin text-teal" />
+              <p className="text-sm font-medium text-foreground">
+                {isRemovingBg ? bgRemovalProgress || "Removing background..." : "Uploading & adding to cart..."}
+              </p>
+              <p className="text-xs text-muted-foreground">This may take a moment</p>
+            </div>
+          )}
+
+          {/* Canvas */}
+          <div ref={containerRef} className="flex-1 flex items-center justify-center p-4 overflow-auto">
+            <div className="relative bg-white rounded-lg shadow-lg border border-border">
+              <canvas ref={canvasRef} />
+            </div>
           </div>
 
-          {/* Canvas Area */}
-          <div className="flex-1 flex flex-col bg-muted/20 relative">
-            {/* Loading Overlay */}
-            {(isRemovingBg || isSavingToCart) && (
-              <div className="absolute inset-0 bg-background/80 z-10 flex flex-col items-center justify-center gap-3">
-                <Loader2 className="w-8 h-8 animate-spin text-teal" />
-                <p className="text-sm font-medium text-foreground">
-                  {isRemovingBg ? bgRemovalProgress || "Removing background..." : "Uploading & adding to cart..."}
-                </p>
-                <p className="text-xs text-muted-foreground">This may take a moment</p>
-              </div>
-            )}
-
-            {/* Canvas */}
-            <div ref={containerRef} className="flex-1 flex items-center justify-center p-4 overflow-auto">
-              <div className="relative bg-white rounded-lg shadow-lg border border-border">
-                <canvas ref={canvasRef} />
-              </div>
-            </div>
-
-            {/* Bottom Toolbar */}
-            <div className="h-14 border-t border-border bg-background flex items-center justify-between px-4">
-              <div className="flex items-center gap-4">
-                {isCropping ? (
-                  <>
-                    <Button size="sm" onClick={applyCrop} className="bg-teal hover:bg-teal/90 text-white" disabled={isSavingToCart}>
-                      <Scissors className="w-4 h-4 mr-1" />
-                      Apply
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={cancelCrop} disabled={isSavingToCart}>
-                      Cancel
-                    </Button>
-                  </>
-                ) : (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleRotate("right")}
-                    className="gap-1"
-                    disabled={isSavingToCart}
-                  >
-                    <RotateCw className="w-4 h-4" />
-                    ROTATE
+          {/* Bottom Toolbar */}
+          <div className="h-14 border-t border-border bg-background flex items-center justify-between px-4">
+            <div className="flex items-center gap-4">
+              {isCropping ? (
+                <>
+                  <Button size="sm" onClick={applyCrop} className="bg-teal hover:bg-teal/90 text-white" disabled={isSavingToCart}>
+                    <Scissors className="w-4 h-4 mr-1" />
+                    Apply
                   </Button>
-                )}
-              </div>
-
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-muted-foreground font-medium">{zoomLevel}%</span>
-                <Button variant="ghost" size="icon" onClick={() => handleZoom("out")} className="w-8 h-8" disabled={isSavingToCart}>
-                  <ZoomOut className="w-4 h-4" />
-                </Button>
-                <Button variant="ghost" size="icon" onClick={() => handleZoom("in")} className="w-8 h-8" disabled={isSavingToCart}>
-                  <ZoomIn className="w-4 h-4" />
-                </Button>
+                  <Button variant="outline" size="sm" onClick={cancelCrop} disabled={isSavingToCart}>
+                    Cancel
+                  </Button>
+                </>
+              ) : (
                 <Button
                   variant="ghost"
-                  size="icon"
-                  onClick={toggleCutLine}
-                  className={`w-8 h-8 ${showCutLine ? "text-red-500" : ""}`}
-                  title="Toggle Cut Line Preview"
+                  size="sm"
+                  onClick={() => handleRotate("right")}
+                  className="gap-1"
                   disabled={isSavingToCart}
                 >
-                  <Eye className="w-4 h-4" />
+                  <RotateCw className="w-4 h-4" />
+                  ROTATE
                 </Button>
-              </div>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground font-medium">{zoomLevel}%</span>
+              <Button variant="ghost" size="icon" onClick={() => handleZoom("out")} className="w-8 h-8" disabled={isSavingToCart}>
+                <ZoomOut className="w-4 h-4" />
+              </Button>
+              <Button variant="ghost" size="icon" onClick={() => handleZoom("in")} className="w-8 h-8" disabled={isSavingToCart}>
+                <ZoomIn className="w-4 h-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={toggleCutLine}
+                className={`w-8 h-8 ${showCutLine ? "text-red-500" : ""}`}
+                title="Toggle Cut Line Preview"
+                disabled={isSavingToCart}
+              >
+                <Eye className="w-4 h-4" />
+              </Button>
             </div>
           </div>
+        </div>
 
-          {/* Right Sidebar - Options Panel */}
-          <div className="w-72 bg-background border-l border-border flex flex-col overflow-y-auto">
-            {/* Layers */}
+        {/* Right Sidebar - Options Panel */}
+        <div className="w-72 bg-background border-l border-border flex flex-col overflow-y-auto">
+          {/* Layers */}
+          <div className="p-4 border-b border-border">
+            <p className="text-xs text-muted-foreground font-medium mb-2">LAYERS</p>
+            <button
+              onClick={() => handleLayerClick("image")}
+              className={`w-full flex items-center justify-between gap-2 py-2 px-3 rounded-lg mb-2 transition-all ${
+                activeLayer === "image" ? "bg-teal/10 border border-teal" : "bg-muted/50 hover:bg-muted border border-transparent"
+              }`}
+              disabled={isSavingToCart}
+            >
+              <div className="flex items-center gap-2">
+                <Image className={`w-4 h-4 ${activeLayer === "image" ? "text-teal" : "text-muted-foreground"}`} />
+                <span className={`text-sm font-medium ${activeLayer === "image" ? "text-teal" : ""}`}>Image</span>
+              </div>
+              {activeLayer === "image" && <Check className="w-4 h-4 text-teal" />}
+            </button>
+
+            <button
+              onClick={toggleBackground}
+              className={`w-full flex items-center justify-between gap-2 py-2 px-3 rounded-lg transition-all ${
+                activeLayer === "background" ? "bg-teal/10 border border-teal" : "bg-muted/30 hover:bg-muted border border-transparent"
+              }`}
+              disabled={isSavingToCart}
+            >
+              <div className="flex items-center gap-2">
+                <Layers className={`w-4 h-4 ${showBackground ? "text-muted-foreground" : "text-muted-foreground/50"}`} />
+                <span className={`text-sm ${!showBackground ? "line-through opacity-50" : ""}`}>Background</span>
+              </div>
+              {showBackground ? <Eye className="w-4 h-4 text-muted-foreground" /> : <EyeOff className="w-4 h-4 text-muted-foreground/50" />}
+            </button>
+
+            <p className="text-[10px] text-muted-foreground mt-2 text-center">
+              Click Image to select • Click Background to toggle visibility
+            </p>
+          </div>
+
+          {/* Need help link */}
+          <div className="p-4 border-b border-border">
+            <p className="text-sm text-center">
+              Need help creating your design? See our{" "}
+              <a href="#" className="text-teal hover:underline font-medium">
+                Artwork Tips
+              </a>
+            </p>
+          </div>
+
+          {/* Border Options - Die Cut */}
+          {productType === "die-cut" && (
             <div className="p-4 border-b border-border">
-              <p className="text-xs text-muted-foreground font-medium mb-2">LAYERS</p>
-              <button
-                onClick={() => handleLayerClick("image")}
-                className={`w-full flex items-center justify-between gap-2 py-2 px-3 rounded-lg mb-2 transition-all ${
-                  activeLayer === "image" ? "bg-teal/10 border border-teal" : "bg-muted/50 hover:bg-muted border border-transparent"
-                }`}
-                disabled={isSavingToCart}
-              >
-                <div className="flex items-center gap-2">
-                  <Image className={`w-4 h-4 ${activeLayer === "image" ? "text-teal" : "text-muted-foreground"}`} />
-                  <span className={`text-sm font-medium ${activeLayer === "image" ? "text-teal" : ""}`}>Image</span>
-                </div>
-                {activeLayer === "image" && <Check className="w-4 h-4 text-teal" />}
-              </button>
+              <label className="text-sm font-semibold text-foreground mb-2 block">BORDER</label>
+              <p className="text-xs text-muted-foreground mb-3">White border around your sticker</p>
+              <div className="grid grid-cols-3 gap-3">
+                {(["none", "small", "large"] as BorderType[]).map((type) => {
+                  const isSelected = borderType === type;
+                  const borderWidth = type === "none" ? 0 : type === "small" ? 3 : 6;
 
-              <button
-                onClick={toggleBackground}
-                className={`w-full flex items-center justify-between gap-2 py-2 px-3 rounded-lg transition-all ${
-                  activeLayer === "background" ? "bg-teal/10 border border-teal" : "bg-muted/30 hover:bg-muted border border-transparent"
-                }`}
-                disabled={isSavingToCart}
-              >
-                <div className="flex items-center gap-2">
-                  <Layers className={`w-4 h-4 ${showBackground ? "text-muted-foreground" : "text-muted-foreground/50"}`} />
-                  <span className={`text-sm ${!showBackground ? "line-through opacity-50" : ""}`}>Background</span>
-                </div>
-                {showBackground ? <Eye className="w-4 h-4 text-muted-foreground" /> : <EyeOff className="w-4 h-4 text-muted-foreground/50" />}
-              </button>
-
-              <p className="text-[10px] text-muted-foreground mt-2 text-center">
-                Click Image to select • Click Background to toggle visibility
-              </p>
-            </div>
-
-            {/* Need help link */}
-            <div className="p-4 border-b border-border">
-              <p className="text-sm text-center">
-                Need help creating your design? See our{" "}
-                <a href="#" className="text-teal hover:underline font-medium">
-                  Artwork Tips
-                </a>
-              </p>
-            </div>
-
-            {/* Border Options - Die Cut */}
-            {productType === "die-cut" && (
-              <div className="p-4 border-b border-border">
-                <label className="text-sm font-semibold text-foreground mb-2 block">BORDER</label>
-                <p className="text-xs text-muted-foreground mb-3">White border around your sticker</p>
-                <div className="grid grid-cols-3 gap-3">
-                  {(["none", "small", "large"] as BorderType[]).map((type) => {
-                    const isSelected = borderType === type;
-                    const borderWidth = type === "none" ? 0 : type === "small" ? 3 : 6;
-
-                    return (
-                      <button
-                        key={type}
-                        onClick={() => setBorderType(type)}
-                        disabled={isSavingToCart}
-                        className={`flex flex-col items-center gap-2 py-3 px-2 rounded-xl text-xs font-medium transition-all ${
-                          isSelected
-                            ? "bg-teal/10 border-2 border-teal text-teal shadow-sm"
-                            : "bg-muted/50 hover:bg-muted text-foreground border-2 border-transparent"
-                        }`}
-                      >
-                        <div className="w-12 h-12 relative flex items-center justify-center">
+                  return (
+                    <button
+                      key={type}
+                      onClick={() => setBorderType(type)}
+                      disabled={isSavingToCart}
+                      className={`flex flex-col items-center gap-2 py-3 px-2 rounded-xl text-xs font-medium transition-all ${
+                        isSelected
+                          ? "bg-teal/10 border-2 border-teal text-teal shadow-sm"
+                          : "bg-muted/50 hover:bg-muted text-foreground border-2 border-transparent"
+                      }`}
+                    >
+                      <div className="w-12 h-12 relative flex items-center justify-center">
+                        <div
+                          className={`absolute rounded-lg transition-all ${isSelected ? "bg-teal/20" : "bg-muted-foreground/10"}`}
+                          style={{
+                            width: `${24 + borderWidth * 2}px`,
+                            height: `${24 + borderWidth * 2}px`,
+                          }}
+                        />
+                        {type !== "none" && (
                           <div
-                            className={`absolute rounded-lg transition-all ${isSelected ? "bg-teal/20" : "bg-muted-foreground/10"}`}
+                            className="absolute bg-white rounded-md shadow-sm"
                             style={{
                               width: `${24 + borderWidth * 2}px`,
                               height: `${24 + borderWidth * 2}px`,
                             }}
                           />
-                          {type !== "none" && (
-                            <div
-                              className="absolute bg-white rounded-md shadow-sm"
-                              style={{
-                                width: `${24 + borderWidth * 2}px`,
-                                height: `${24 + borderWidth * 2}px`,
-                              }}
-                            />
-                          )}
-                          <div
-                            className={`relative rounded-md transition-all ${
-                              isSelected ? "bg-gradient-to-br from-teal to-teal/70" : "bg-gradient-to-br from-muted-foreground/40 to-muted-foreground/20"
-                            }`}
-                            style={{ width: "24px", height: "24px" }}
-                          >
-                            <div className="w-full h-full flex items-center justify-center">
-                              <div className={`w-3 h-3 rounded-full ${isSelected ? "bg-white/80" : "bg-white/50"}`} />
-                            </div>
+                        )}
+                        <div
+                          className={`relative rounded-md transition-all ${
+                            isSelected ? "bg-gradient-to-br from-teal to-teal/70" : "bg-gradient-to-br from-muted-foreground/40 to-muted-foreground/20"
+                          }`}
+                          style={{ width: "24px", height: "24px" }}
+                        >
+                          <div className="w-full h-full flex items-center justify-center">
+                            <div className={`w-3 h-3 rounded-full ${isSelected ? "bg-white/80" : "bg-white/50"}`} />
                           </div>
-                          <div
-                            className={`absolute rounded-lg border-2 border-dashed pointer-events-none ${
-                              isSelected ? "border-teal" : "border-muted-foreground/30"
-                            }`}
-                            style={{
-                              width: `${24 + borderWidth * 2 + 4}px`,
-                              height: `${24 + borderWidth * 2 + 4}px`,
-                            }}
-                          />
                         </div>
-                        <span className="capitalize">{type}</span>
-                        <span className="text-[10px] text-muted-foreground">
-                          {type === "none" ? "No margin" : type === "small" ? '1/16" margin' : '1/8" margin'}
-                        </span>
-                      </button>
-                    );
-                  })}
+                        <div
+                          className={`absolute rounded-lg border-2 border-dashed pointer-events-none ${
+                            isSelected ? "border-teal" : "border-muted-foreground/30"
+                          }`}
+                          style={{
+                            width: `${24 + borderWidth * 2 + 4}px`,
+                            height: `${24 + borderWidth * 2 + 4}px`,
+                          }}
+                        />
+                      </div>
+                      <span className="capitalize">{type}</span>
+                      <span className="text-[10px] text-muted-foreground">
+                        {type === "none" ? "No margin" : type === "small" ? '1/16" margin' : '1/8" margin'}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Size & Quantity */}
+          <div className="p-4 border-b border-border">
+            <div className="grid grid-cols-5 gap-2 items-end">
+              <div className="col-span-2">
+                <label className="text-xs text-muted-foreground font-medium mb-1 block">WIDTH</label>
+                <div className="flex items-center">
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={localWidth}
+                    disabled={isSavingToCart}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (value === "" || /^\d*\.?\d*$/.test(value)) setLocalWidth(value);
+                    }}
+                    onBlur={() => {
+                      const num = parseFloat(localWidth);
+                      if (isNaN(num) || num < 0.5) setLocalWidth("0.5");
+                    }}
+                    className="flex h-10 w-full rounded-l-md border border-r-0 border-border bg-background px-3 py-2 text-sm text-center focus:outline-none focus:ring-2 focus:ring-teal focus:ring-offset-0"
+                  />
+                  <span className="px-2 py-2 h-10 flex items-center bg-muted border border-l-0 border-border rounded-r-md text-sm text-muted-foreground">
+                    in
+                  </span>
                 </div>
               </div>
-            )}
-
-            {/* Size & Quantity */}
-            <div className="p-4 border-b border-border">
-              <div className="grid grid-cols-5 gap-2 items-end">
-                <div className="col-span-2">
-                  <label className="text-xs text-muted-foreground font-medium mb-1 block">WIDTH</label>
-                  <div className="flex items-center">
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      value={localWidth}
-                      disabled={isSavingToCart}
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        if (value === "" || /^\d*\.?\d*$/.test(value)) setLocalWidth(value);
-                      }}
-                      onBlur={() => {
-                        const num = parseFloat(localWidth);
-                        if (isNaN(num) || num < 0.5) setLocalWidth("0.5");
-                      }}
-                      className="flex h-10 w-full rounded-l-md border border-r-0 border-border bg-background px-3 py-2 text-sm text-center focus:outline-none focus:ring-2 focus:ring-teal focus:ring-offset-0"
-                    />
-                    <span className="px-2 py-2 h-10 flex items-center bg-muted border border-l-0 border-border rounded-r-md text-sm text-muted-foreground">
-                      in
-                    </span>
-                  </div>
-                </div>
-                <div className="flex items-end justify-center pb-2">
-                  <span className="text-muted-foreground font-medium">×</span>
-                </div>
-                <div className="col-span-2">
-                  <label className="text-xs text-muted-foreground font-medium mb-1 block">HEIGHT</label>
-                  <div className="flex items-center">
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      value={localHeight}
-                      disabled={isSavingToCart}
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        if (value === "" || /^\d*\.?\d*$/.test(value)) setLocalHeight(value);
-                      }}
-                      onBlur={() => {
-                        const num = parseFloat(localHeight);
-                        if (isNaN(num) || num < 0.5) setLocalHeight("0.5");
-                      }}
-                      className="flex h-10 w-full rounded-l-md border border-r-0 border-border bg-background px-3 py-2 text-sm text-center focus:outline-none focus:ring-2 focus:ring-teal focus:ring-offset-0"
-                    />
-                    <span className="px-2 py-2 h-10 flex items-center bg-muted border border-l-0 border-border rounded-r-md text-sm text-muted-foreground">
-                      in
-                    </span>
-                  </div>
-                </div>
+              <div className="flex items-end justify-center pb-2">
+                <span className="text-muted-foreground font-medium">×</span>
               </div>
-
-              <div className="mt-4">
-                <label className="text-xs text-muted-foreground font-medium mb-1 block">QUANTITY</label>
-                <select
-                  value={localQuantity}
-                  disabled={isSavingToCart}
-                  onChange={(e) => setLocalQuantity(parseInt(e.target.value))}
-                  className="w-full h-10 px-3 rounded-md border border-border bg-background text-foreground text-sm"
-                >
-                  {quantityOptions.map((qty) => (
-                    <option key={qty} value={qty}>
-                      {qty}
-                    </option>
-                  ))}
-                </select>
+              <div className="col-span-2">
+                <label className="text-xs text-muted-foreground font-medium mb-1 block">HEIGHT</label>
+                <div className="flex items-center">
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={localHeight}
+                    disabled={isSavingToCart}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (value === "" || /^\d*\.?\d*$/.test(value)) setLocalHeight(value);
+                    }}
+                    onBlur={() => {
+                      const num = parseFloat(localHeight);
+                      if (isNaN(num) || num < 0.5) setLocalHeight("0.5");
+                    }}
+                    className="flex h-10 w-full rounded-l-md border border-r-0 border-border bg-background px-3 py-2 text-sm text-center focus:outline-none focus:ring-2 focus:ring-teal focus:ring-offset-0"
+                  />
+                  <span className="px-2 py-2 h-10 flex items-center bg-muted border border-l-0 border-border rounded-r-md text-sm text-muted-foreground">
+                    in
+                  </span>
+                </div>
               </div>
             </div>
 
-            {/* Price */}
-            <div className="p-4 border-b border-border">
-              <p className="text-sm text-teal font-medium text-center mb-2">Order more, save more!</p>
-              <div className="flex items-end justify-between">
-                <span className="text-3xl font-bold text-foreground">${price}</span>
-                <span className="text-sm text-muted-foreground">${pricePerUnit}/unit</span>
-              </div>
-            </div>
-
-            {/* Actions */}
-            <div className="p-4 space-y-3 mt-auto">
-              <Button
-                onClick={handleSave}
+            <div className="mt-4">
+              <label className="text-xs text-muted-foreground font-medium mb-1 block">QUANTITY</label>
+              <select
+                value={localQuantity}
                 disabled={isSavingToCart}
-                className="w-full bg-teal hover:bg-teal/90 text-white py-6 text-base font-semibold rounded-full"
+                onChange={(e) => setLocalQuantity(parseInt(e.target.value))}
+                className="w-full h-10 px-3 rounded-md border border-border bg-background text-foreground text-sm"
               >
-                {isSavingToCart ? (
-                  <>
-                    <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                    ADDING...
-                  </>
-                ) : (
-                  "REVIEW & ADD TO CART"
-                )}
-              </Button>
-              <Button variant="link" onClick={handleDownload} disabled={isSavingToCart} className="w-full text-teal hover:text-teal/80 font-medium">
-                <Download className="w-4 h-4 mr-2" />
-                SAVE ARTWORK
-              </Button>
+                {quantityOptions.map((qty) => (
+                  <option key={qty} value={qty}>
+                    {qty}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
+
+          {/* Price */}
+          <div className="p-4 border-b border-border">
+            <p className="text-sm text-teal font-medium text-center mb-2">Order more, save more!</p>
+            <div className="flex items-end justify-between">
+              <span className="text-3xl font-bold text-foreground">${price}</span>
+              <span className="text-sm text-muted-foreground">${pricePerUnit}/unit</span>
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div className="p-4 space-y-3 mt-auto">
+            <Button
+              onClick={handleSave}
+              disabled={isSavingToCart}
+              className="w-full bg-teal hover:bg-teal/90 text-white py-6 text-base font-semibold rounded-full"
+            >
+              {isSavingToCart ? (
+                <>
+                  <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                  ADDING...
+                </>
+              ) : (
+                "REVIEW & ADD TO CART"
+              )}
+            </Button>
+            <Button variant="link" onClick={handleDownload} disabled={isSavingToCart} className="w-full text-teal hover:text-teal/80 font-medium">
+              <Download className="w-4 h-4 mr-2" />
+              SAVE ARTWORK
+            </Button>
+          </div>
         </div>
+      </div>
+    </div>
+  );
+
+  /**
+   * ✅ 核心：embed 模式不要 Dialog
+   * 不然 iframe 内部会再渲染一层 overlay（你截图黑框就是它）
+   */
+  if (embedded) {
+    if (!isOpen) return null;
+    return (
+      <div className="w-screen h-screen bg-white overflow-hidden">
+        {editorBody}
+      </div>
+    );
+  }
+
+  // 站内正常模式：保留 Dialog
+  return (
+    <Dialog open={isOpen} onOpenChange={(open) => !open && !isSavingToCart && onClose()}>
+      <DialogContent className="max-w-6xl w-[95vw] h-[90vh] p-0 overflow-hidden flex flex-col bg-background [&>button]:hidden">
+        {editorBody}
       </DialogContent>
     </Dialog>
   );
