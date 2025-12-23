@@ -198,6 +198,7 @@ export default function EditorEmbed() {
       {/* ✅ 关键：没收到 OPEN_EDITOR 前不要 mount ImageEditor（避免先渲染出一层 Dialog/overlay） */}
       {!waiting && imageUrl && (
         <ImageEditor
+          embedded
           isOpen={isOpen}
           onClose={closeEditor}
           imageUrl={imageUrl}
