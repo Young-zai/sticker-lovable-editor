@@ -41,8 +41,11 @@ function toStr(v: any, fallback: string) {
 }
 
 export default function EditorEmbed() {
-  // editor state
-  const [isOpen, setIsOpen] = useState(true);
+  // ✅ 初始不要打开：等 OPEN_EDITOR 来了才打开
+  const [isOpen, setIsOpen] = useState(false);
+
+  // ✅ OPEN_EDITOR 去重（1.2s 内相同 payload 只处理一次）
+  const lastOpenRef = useRef<{ key: string; at: number }>({ key: "", at: 0 });
 
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [width, setWidth] = useState<string>("3");
@@ -60,24 +63,44 @@ export default function EditorEmbed() {
   const parentWinRef = useRef<Window | null>(null);
   const parentOriginRef = useRef<string>("*");
 
-  /**
-   * ✅ 允许的父页面 origin 白名单
-   * - 开发期：localhost + 你的 Shopify 域名
-   * - 上线：填你的正式 Shopify 域名（以及预览域名）
-   *
-   * 先给你一个“可用默认值”：不写死，先用 "*" 接收，但回传用收到的 e.origin
-   * （这样线上更安全）
-   */
   const allowedOrigins = useMemo(() => {
-    // 你可以按需加： "https://your-store.myshopify.com", "https://www.yourstore.com"
     return new Set<string>([
       "http://localhost:8080",
       "http://localhost:3000",
       "http://localhost:5173",
-      // Shopify 预览有时是 https://xxxx.myshopify.com
-      // 这里先不强校验域名模式，等你上线再收紧
+      // 线上你可以在这里加入你的 shopify 域名
     ]);
   }, []);
+
+  const postToParent = (payload: any) => {
+    const win = parentWinRef.current ?? window.parent;
+    const origin = parentOriginRef.current || "*";
+    try {
+      win?.postMessage(payload, origin === "null" ? "*" : origin);
+    } catch {
+      win?.postMessage(payload, "*");
+    }
+  };
+
+  const closeEditor = () => {
+    setIsOpen(false);
+    postToParent({ type: "EDITOR_CLOSED" });
+  };
+
+  const handleSave = (editedImageUrl: string) => {
+    postToParent({
+      type: "EDITOR_SAVED",
+      editedImageUrl,
+      width,
+      height,
+      quantity,
+      productType,
+      price,
+      pricePerUnit,
+    });
+
+    setIsOpen(false);
+  };
 
   useEffect(() => {
     // 1) 告诉父页面：iframe 已就绪
@@ -88,19 +111,31 @@ export default function EditorEmbed() {
       const d = e.data as OpenPayload;
       if (!d || d.type !== "OPEN_EDITOR") return;
 
-      /**
-       * ✅ 接收端安全策略：
-       * - 开发阶段：允许 localhost / 任意（避免你卡在域名校验）
-       * - 上线后：你可以把下面逻辑改成“只允许白名单”
-       */
+      // （可选）开发期允许 localhost；上线后可收紧
       const isLocal =
         e.origin.startsWith("http://localhost") ||
         e.origin.startsWith("http://127.0.0.1");
-      const isAllowed = isLocal || allowedOrigins.has(e.origin) || allowedOrigins.size === 0;
-
-      // 你现在要顺滑开发：先不 hard block，但会记录 origin
-      // 如果你要强校验：把下面 if 打开即可
+      const isAllowed =
+        isLocal || allowedOrigins.has(e.origin) || allowedOrigins.size === 0;
       // if (!isAllowed) return;
+
+      // ✅ 去重：同一 payload 1.2 秒内只处理一次
+      const key = [
+        String(d.imageUrl || "").slice(0, 80),
+        toStr(d.width, "3"),
+        toStr(d.height, "3"),
+        String(toNum(d.quantity, 100)),
+        String(d.productType || "die-cut"),
+        toStr(d.price, "0.00"),
+        toStr(d.pricePerUnit, "0.00"),
+      ].join("|");
+
+      const now = Date.now();
+      if (lastOpenRef.current.key === key && now - lastOpenRef.current.at < 1200) {
+        console.warn("[embed] duplicate OPEN_EDITOR ignored");
+        return;
+      }
+      lastOpenRef.current = { key, at: now };
 
       parentWinRef.current = e.source as Window;
       parentOriginRef.current = e.origin || "*";
@@ -120,9 +155,8 @@ export default function EditorEmbed() {
 
     window.addEventListener("message", onMessage);
 
-    // 3) 10 秒还没收到 OPEN_EDITOR，就给个提示（不影响功能）
     const t = window.setTimeout(() => {
-      setWaiting((w) => w); // 保持现状，只是为了不“白屏无反馈”
+      setWaiting((w) => w);
     }, 10000);
 
     return () => {
@@ -131,35 +165,9 @@ export default function EditorEmbed() {
     };
   }, [allowedOrigins]);
 
-  const postToParent = (payload: any) => {
-    const win = parentWinRef.current ?? window.parent;
-    const origin = parentOriginRef.current || "*";
-    try {
-      win?.postMessage(payload, origin === "null" ? "*" : origin);
-    } catch {
-      // 某些环境下 origin 可能异常，兜底用 *
-      win?.postMessage(payload, "*");
-    }
-  };
-
-  const handleSave = (editedImageUrl: string) => {
-    postToParent({
-      type: "EDITOR_SAVED",
-      editedImageUrl,
-      width,
-      height,
-      quantity,
-      productType,
-      price,
-      pricePerUnit,
-    });
-
-    setIsOpen(false);
-  };
-
   return (
     <div style={{ width: "100vw", height: "100vh", background: "#fff" }}>
-      {/* 没收到 OPEN_EDITOR 时给提示（不会影响 iframe 正常工作） */}
+      {/* 没收到 OPEN_EDITOR 时给提示 */}
       {waiting && (
         <div
           style={{
@@ -187,24 +195,24 @@ export default function EditorEmbed() {
         </div>
       )}
 
-      <ImageEditor
-        isOpen={isOpen}
-        onClose={() => {
-          setIsOpen(false);
-          postToParent({ type: "EDITOR_CLOSED" });
-        }}
-        imageUrl={imageUrl}
-        onSave={handleSave}
-        productType={productType}
-        width={width}
-        height={height}
-        quantity={quantity}
-        onWidthChange={setWidth}
-        onHeightChange={setHeight}
-        onQuantityChange={setQuantity}
-        price={price}
-        pricePerUnit={pricePerUnit}
-      />
+      {/* ✅ 关键：没收到 OPEN_EDITOR 前不要 mount ImageEditor（避免先渲染出一层 Dialog/overlay） */}
+      {!waiting && imageUrl && (
+        <ImageEditor
+          isOpen={isOpen}
+          onClose={closeEditor}
+          imageUrl={imageUrl}
+          onSave={handleSave}
+          productType={productType}
+          width={width}
+          height={height}
+          quantity={quantity}
+          onWidthChange={setWidth}
+          onHeightChange={setHeight}
+          onQuantityChange={setQuantity}
+          price={price}
+          pricePerUnit={pricePerUnit}
+        />
+      )}
     </div>
   );
 }
